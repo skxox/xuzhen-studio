@@ -283,6 +283,8 @@ def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Sessio
         raise HTTPException(404, "stage_not_found")
     if stage.status != "needs_review":
         raise HTTPException(409, "stage_must_be_in_needs_review_before_decision")
+    if stage_key == "creativeBrief" and data.action == "waive":
+        raise HTTPException(422, "creative_brief_cannot_be_waived")
     if data.action in {"waive", "reject"} and not data.reason:
         raise HTTPException(422, "reason_required")
     if data.action == "waive" and not data.risk_ack:

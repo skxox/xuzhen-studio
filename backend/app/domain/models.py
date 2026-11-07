@@ -63,6 +63,22 @@ class CharacterReference(Timestamped, Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
 
 
+class CreativeBrief(Timestamped, Base):
+    __tablename__ = "creative_briefs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    premise: Mapped[str] = mapped_column(Text)
+    genre: Mapped[str] = mapped_column(String(200))
+    target_readers: Mapped[str] = mapped_column(Text)
+    narrative_pov: Mapped[str] = mapped_column(String(200))
+    planned_scope: Mapped[str] = mapped_column(String(300))
+    style_baseline: Mapped[str] = mapped_column(Text)
+    constraints: Mapped[str] = mapped_column(Text, default="")
+    rights_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+
+
 class StageState(Timestamped, Base):
     __tablename__ = "stage_states"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

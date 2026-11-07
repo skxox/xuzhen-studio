@@ -8,9 +8,26 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..domain.models import AuditEvent, CharacterReference, Chapter, GenerationJob, Project, ServiceProfile, StageState
+from ..domain.models import (
+    AuditEvent,
+    CharacterReference,
+    Chapter,
+    CreativeBrief,
+    GenerationJob,
+    Project,
+    ServiceProfile,
+    StageState,
+)
 from ..infrastructure.database import SessionLocal
-from .schemas import CharacterReferenceCreate, ChapterCreate, GateDecision, JobCreate, ProjectCreate, ServiceProfileCreate
+from .schemas import (
+    CharacterReferenceCreate,
+    ChapterCreate,
+    CreativeBriefSave,
+    GateDecision,
+    JobCreate,
+    ProjectCreate,
+    ServiceProfileCreate,
+)
 
 VIDEO_STAGES = ("source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
 NOVEL_STAGES = ("creativeBrief", "storyBible", "novelOutline", "literaryCharacters", "novelDraft", "continuity", "manuscriptRelease", "source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
@@ -73,6 +90,15 @@ def safe_character_reference(item: CharacterReference):
             "immutable_features": item.immutable_features, "costume_rules": item.costume_rules,
             "reference_views": item.reference_views, "status": item.status,
             "version": item.version, "created_at": item.created_at, "updated_at": item.updated_at}
+
+
+def safe_creative_brief(item: CreativeBrief):
+    return {"id": item.id, "project_id": item.project_id, "premise": item.premise,
+            "genre": item.genre, "target_readers": item.target_readers,
+            "narrative_pov": item.narrative_pov, "planned_scope": item.planned_scope,
+            "style_baseline": item.style_baseline, "constraints": item.constraints,
+            "rights_confirmed": item.rights_confirmed, "revision": item.revision,
+            "status": item.status, "created_at": item.created_at, "updated_at": item.updated_at}
 
 
 @router.get("/health")
@@ -201,6 +227,40 @@ def create_character_reference(project_id: str, data: CharacterReferenceCreate, 
     db.commit()
     db.refresh(item)
     return safe_character_reference(item)
+
+
+@router.get("/projects/{project_id}/creative-brief")
+def get_creative_brief(project_id: str, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "original":
+        raise HTTPException(409, "creative_brief_only_available_for_original_projects")
+    item = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
+    return safe_creative_brief(item) if item else None
+
+
+@router.put("/projects/{project_id}/creative-brief")
+def save_creative_brief(
+    project_id: str, data: CreativeBriefSave, db: Session = Depends(get_db)
+):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "original":
+        raise HTTPException(409, "creative_brief_only_available_for_original_projects")
+    item = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
+    if item:
+        for field, value in data.model_dump().items():
+            setattr(item, field, value)
+        item.revision += 1
+    else:
+        item = CreativeBrief(project_id=project_id, **data.model_dump())
+        db.add(item)
+        db.flush()
+    audit(db, project_id, "creative_brief.saved", item.id, {
+        "revision": item.revision, "rights_confirmed": item.rights_confirmed,
+        "status": item.status,
+    })
+    db.commit()
+    db.refresh(item)
+    return safe_creative_brief(item)
 
 
 @router.post("/projects/{project_id}/stages/{stage_key}/decision")

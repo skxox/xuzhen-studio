@@ -31,6 +31,31 @@ class CharacterReferenceCreate(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
+class CreativeBriefSave(BaseModel):
+    premise: str = Field(min_length=1, max_length=3000)
+    genre: str = Field(min_length=1, max_length=200)
+    target_readers: str = Field(min_length=1, max_length=1000)
+    narrative_pov: str = Field(min_length=1, max_length=200)
+    planned_scope: str = Field(min_length=1, max_length=300)
+    style_baseline: str = Field(min_length=1, max_length=3000)
+    constraints: str = Field(default="", max_length=3000)
+    rights_confirmed: bool = False
+
+    @field_validator(
+        "premise",
+        "genre",
+        "target_readers",
+        "narrative_pov",
+        "planned_scope",
+        "style_baseline",
+        "constraints",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
 class ServiceProfileCreate(BaseModel):
     modality: Literal["text", "image", "video", "audio"]
     name: str = Field(min_length=1, max_length=120)

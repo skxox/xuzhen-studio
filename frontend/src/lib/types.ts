@@ -55,6 +55,25 @@ export interface CharacterReferenceCreateInput {
   costume_rules: string;
 }
 
+export interface CreativeBrief {
+  id: string;
+  project_id: string;
+  premise: string;
+  genre: string;
+  target_readers: string;
+  narrative_pov: string;
+  planned_scope: string;
+  style_baseline: string;
+  constraints: string;
+  rights_confirmed: boolean;
+  revision: number;
+  status: 'draft' | 'needs_review' | 'accepted';
+  created_at: string;
+  updated_at: string;
+}
+
+export type CreativeBriefSaveInput = Omit<CreativeBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
+
 export interface ServiceProfile {
   id: string;
   modality: string;

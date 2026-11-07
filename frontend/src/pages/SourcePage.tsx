@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, ChevronRight, FileText, FolderInput, LockKeyhole, Plus, ShieldCheck, Sparkles, UploadCloud } from 'lucide-react';
-import type { Project } from '../lib/types';
+import type { CreativeBriefSaveInput, Project } from '../lib/types';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -42,7 +42,7 @@ export function SourcePage({ project }: { project?: Project }) {
         <div className="analysis-flow"><AnalysisStep number="01" title="章节结构与段落索引" detail="识别章 / 节标题，建立可回跳原文位置"/><AnalysisStep number="02" title="人物、关系与状态" detail="姓名与别名归并；区分原文事实和模型推断"/><AnalysisStep number="03" title="事件、对白与伏笔" detail="提取时间线、信息揭露顺序和场景道具"/><AnalysisStep number="04" title="确认分析候选" detail="逐条审阅出处后，才允许生成改编大纲"/></div>
         <Button variant="primary" disabled={!project || !chapters.data?.length} icon={<Sparkles size={15}/>} onClick={() => setToast('文本 Provider Adapter 尚未接入，因此不会发起真实模型调用。')}>分析原文 <ChevronRight size={14}/></Button>
       </Panel>
-    </div> : <BriefWorkspace onSave={() => setToast('创意简报只在本地界面状态保存；原创章节 API 尚待开发。')}/ >}
+    </div> : <BriefWorkspace project={project} onSave={setToast} onGenerate={() => setToast('故事圣经生成尚未启用：请先配置文本服务，接入真实 Provider 后才会创建生成任务。')}/ >}
   </div>;
 }
 
@@ -50,10 +50,31 @@ function AnalysisStep({ number, title, detail }: { number: string; title: string
   return <div className="analysis-step"><span>{number}</span><div><b>{title}</b><small>{detail}</small></div></div>;
 }
 
-function BriefWorkspace({ onSave }: { onSave: () => void }) {
-  return <div className="brief-grid"><Panel className="brief-form"><div className="panel-heading"><div><div className="eyebrow">CREATIVE BRIEF · DRAFT 01</div><h3>把创作边界讲清楚</h3><p>简报经作者确认后，AI 才能生成故事圣经和章节大纲。</p></div><Badge tone="gold">未确认</Badge></div>
-    <div className="brief-form__fields"><Field label="一句话故事 premise"><TextInput defaultValue="南汀岛旧气象站封存前，档案修复员林澄在一场旧风暴的记录里发现被挪走的十一分钟。" /></Field><div className="form-row"><Field label="类型与子类型"><TextInput defaultValue="海岛悬疑 · 现实群像"/></Field><Field label="目标读者"><TextInput defaultValue="喜欢地方故事、档案谜题与克制关系线的成年读者"/></Field></div><div className="form-row"><Field label="叙事视角"><TextInput defaultValue="第三人称限知 · 林澄视角"/></Field><Field label="规划规模"><TextInput defaultValue="8 集短篇小说 · 每章约 2200 字"/></Field></div><Field label="风格基线"><TextArea rows={3} defaultValue="潮湿、安静、细节准确。谜题由仪器记录、档案版本和人物选择推进；不使用超自然解释。海岛生活有具体劳作与地方气候，不把居民写成背景奇观。"/></Field><Field label="不可写内容 / 约束"><TextArea rows={2} placeholder="暴力尺度、禁用设定、必须保留的现实边界"/></Field><label className="rights-checkbox"><input type="checkbox"/><span>我确认拥有本原创设定与正文的创作权利，并可按项目授权给所选模型服务处理。</span></label>
-      <div className="brief-actions"><span>草稿 · 自动保存至当前浏览器</span><Button onClick={onSave}>保存简报</Button><Button variant="primary" icon={<Sparkles size={14}/>}>生成故事圣经候选</Button></div>
-    </div></Panel><Panel className="brief-preview"><div className="eyebrow">AI WILL DEVELOP</div><h3>下一步会发生什么</h3><div className="brief-preview__item"><span>01</span><b>故事核心与冲突引擎</b><small>角色目标、阻碍、代价与因果钩子</small></div><div className="brief-preview__item"><span>02</span><b>世界规则与人物圣经</b><small>故事规则、关系弧、人物行为边界</small></div><div className="brief-preview__item"><span>03</span><b>分卷 / 分集 / 章节大纲</b><small>章节卡有目标、冲突、转折与钩子</small></div><div className="note-box"><ShieldCheck size={15}/>所有内容先作为候选；逐项接受后才会进入章节生成上下文。</div></Panel>
+function BriefWorkspace({ project, onSave, onGenerate }: { project?: Project; onSave: (message: string) => void; onGenerate: () => void }) {
+  const queryClient = useQueryClient();
+  const briefQuery = useQuery({ queryKey: ['creative-brief', project?.id], queryFn: () => api.creativeBrief(project!.id), enabled: Boolean(project?.id && project.creation_mode === 'original'), retry: false });
+  const saveMutation = useMutation({ mutationFn: (input: CreativeBriefSaveInput) => api.saveCreativeBrief(project!.id, input), onSuccess: async (brief) => {
+    queryClient.setQueryData(['creative-brief', project?.id], brief);
+    onSave(`创意简报已保存到项目 · 修订 v${String(brief.revision).padStart(2, '0')}。`);
+  } });
+  if (briefQuery.isLoading && project?.id) return <div className="chapter-empty">正在读取项目创意简报…</div>;
+  const brief = briefQuery.data;
+  const canSave = Boolean(project?.id && project.creation_mode === 'original');
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!project?.id) return;
+    const form = new FormData(event.currentTarget);
+    saveMutation.mutate({
+      premise: String(form.get('premise') ?? ''), genre: String(form.get('genre') ?? ''),
+      target_readers: String(form.get('target_readers') ?? ''), narrative_pov: String(form.get('narrative_pov') ?? ''),
+      planned_scope: String(form.get('planned_scope') ?? ''), style_baseline: String(form.get('style_baseline') ?? ''),
+      constraints: String(form.get('constraints') ?? ''), rights_confirmed: form.get('rights_confirmed') === 'on',
+    });
+  };
+  return <div className="brief-grid"><Panel className="brief-form"><div className="panel-heading"><div><div className="eyebrow">CREATIVE BRIEF · {brief ? `REVISION ${String(brief.revision).padStart(2, '0')}` : 'DRAFT'}</div><h3>把创作边界讲清楚</h3><p>简报保存到当前项目后，才能作为原创故事生成任务的输入。</p></div><Badge tone={brief ? 'blue' : 'gold'}>{brief ? '已保存草稿' : '未保存'}</Badge></div>
+    <form className="brief-form__fields" onSubmit={submit}>{project && project.creation_mode !== 'original' && <div className="inline-notice"><BookOpen size={17}/><span>当前项目创建于“已有小说改编”入口。创意简报只保存到原创项目，请切换或新建原创项目。</span></div>}<Field label="一句话故事 premise"><TextInput name="premise" required maxLength={3000} defaultValue={brief?.premise ?? '南汀岛旧气象站封存前，档案修复员林澄在一场旧风暴的记录里发现被挪走的十一分钟。'} /></Field><div className="form-row"><Field label="类型与子类型"><TextInput name="genre" required maxLength={200} defaultValue={brief?.genre ?? '海岛悬疑 · 现实群像'}/></Field><Field label="目标读者"><TextInput name="target_readers" required maxLength={1000} defaultValue={brief?.target_readers ?? '喜欢地方故事、档案谜题与克制关系线的成年读者'}/></Field></div><div className="form-row"><Field label="叙事视角"><TextInput name="narrative_pov" required maxLength={200} defaultValue={brief?.narrative_pov ?? '第三人称限知 · 林澄视角'}/></Field><Field label="规划规模"><TextInput name="planned_scope" required maxLength={300} defaultValue={brief?.planned_scope ?? '8 集短篇小说 · 每章约 2200 字'}/></Field></div><Field label="风格基线"><TextArea name="style_baseline" rows={3} required maxLength={3000} defaultValue={brief?.style_baseline ?? '潮湿、安静、细节准确。谜题由仪器记录、档案版本和人物选择推进；不使用超自然解释。海岛生活有具体劳作与地方气候，不把居民写成背景奇观。'}/></Field><Field label="不可写内容 / 约束"><TextArea name="constraints" rows={2} maxLength={3000} defaultValue={brief?.constraints ?? ''} placeholder="暴力尺度、禁用设定、必须保留的现实边界"/></Field><label className="rights-checkbox"><input name="rights_confirmed" type="checkbox" defaultChecked={brief?.rights_confirmed ?? false}/><span>我确认拥有本原创设定与正文的创作权利，并可按项目授权给所选模型服务处理。</span></label>
+      {briefQuery.isError && <p role="alert" className="form-error">读取简报失败：{briefQuery.error.message}</p>}{saveMutation.isError && <p role="alert" className="form-error">保存失败：{saveMutation.error.message}</p>}
+      <div className="brief-actions"><span>{canSave ? '项目草稿 · 需手动保存' : '创建原创项目后可保存'}</span><Button type="submit" disabled={!canSave || saveMutation.isPending}>{saveMutation.isPending ? '正在保存…' : '保存简报'}</Button><Button type="button" variant="primary" icon={<Sparkles size={14}/>} onClick={onGenerate}>生成故事圣经候选</Button></div>
+    </form></Panel><Panel className="brief-preview"><div className="eyebrow">AI WILL DEVELOP</div><h3>下一步会发生什么</h3><div className="brief-preview__item"><span>01</span><b>故事核心与冲突引擎</b><small>角色目标、阻碍、代价与因果钩子</small></div><div className="brief-preview__item"><span>02</span><b>世界规则与人物圣经</b><small>故事规则、关系弧、人物行为边界</small></div><div className="brief-preview__item"><span>03</span><b>分卷 / 分集 / 章节大纲</b><small>章节卡有目标、冲突、转折与钩子</small></div><div className="note-box"><ShieldCheck size={15}/>所有内容先作为候选；逐项接受后才会进入章节生成上下文。</div></Panel>
   </div>;
 }

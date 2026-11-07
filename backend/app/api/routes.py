@@ -1,8 +1,11 @@
 import hashlib
 import re
 from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,6 +16,7 @@ from ..domain.models import (
     CharacterReference,
     Chapter,
     CommercialBrief,
+    CommercialMaterial,
     CreativeBrief,
     GenerationJob,
     Project,
@@ -136,6 +140,16 @@ def safe_commercial_brief(item: CommercialBrief):
         "target_seconds": item.target_seconds, "rights_confirmed": item.rights_confirmed,
         "revision": item.revision, "status": item.status,
         "created_at": item.created_at, "updated_at": item.updated_at,
+    }
+
+
+def safe_commercial_material(item: CommercialMaterial):
+    return {
+        "id": item.id, "project_id": item.project_id, "original_name": item.original_name,
+        "media_kind": item.media_kind, "content_type": item.content_type,
+        "size_bytes": item.size_bytes, "sha256": item.sha256,
+        "rights_status": item.rights_status, "created_at": item.created_at,
+        "file_url": f"/projects/{item.project_id}/commercial-materials/{item.id}/file",
     }
 
 
@@ -367,6 +381,119 @@ def save_commercial_brief(project_id: str, data: CommercialBriefSave, db: Sessio
     return safe_commercial_brief(item)
 
 
+@router.get("/projects/{project_id}/commercial-materials")
+def list_commercial_materials(project_id: str, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "commercial":
+        raise HTTPException(409, "commercial_materials_only_available_for_commercial_projects")
+    items = db.scalars(select(CommercialMaterial).where(
+        CommercialMaterial.project_id == project_id
+    ).order_by(CommercialMaterial.created_at)).all()
+    return [safe_commercial_material(item) for item in items]
+
+
+@router.post("/projects/{project_id}/commercial-materials", status_code=201)
+async def upload_commercial_material(
+    project_id: str,
+    file: UploadFile = File(...),
+    rights_status: Literal["owned", "licensed", "public_domain", "restricted"] = Form(...),
+    db: Session = Depends(get_db),
+):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "commercial":
+        raise HTTPException(409, "commercial_materials_only_available_for_commercial_projects")
+    stage = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "commercialBrief"
+    ))
+    if stage and stage.status == "needs_review":
+        raise HTTPException(409, "commercial_materials_locked_during_review")
+
+    name = Path(file.filename or "material").name
+    suffix = Path(name).suffix.lower()
+    content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, "upload_too_large")
+    signatures: dict[str, tuple[str, str, bytes]] = {
+        ".png": ("image", "image/png", b"\x89PNG\r\n\x1a\n"),
+        ".jpg": ("image", "image/jpeg", b"\xff\xd8\xff"),
+        ".jpeg": ("image", "image/jpeg", b"\xff\xd8\xff"),
+        ".webp": ("image", "image/webp", b"RIFF"),
+        ".mp4": ("video", "video/mp4", b"ftyp"),
+        ".webm": ("video", "video/webm", b"\x1aE\xdf\xa3"),
+        ".pdf": ("document", "application/pdf", b"%PDF-"),
+    }
+    text_types = {".txt": "text/plain", ".md": "text/markdown"}
+    if suffix in signatures:
+        kind, content_type, signature = signatures[suffix]
+        signature_matches = content[4:8] == signature if suffix == ".mp4" else content.startswith(signature)
+        if suffix == ".webp":
+            signature_matches = content.startswith(signature) and content[8:12] == b"WEBP"
+        if not signature_matches:
+            raise HTTPException(415, "file_signature_does_not_match_extension")
+    elif suffix in text_types:
+        try:
+            content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise HTTPException(422, "text_material_must_be_utf8")
+        kind, content_type = "document", text_types[suffix]
+    else:
+        raise HTTPException(415, "unsupported_material_type")
+    if not content:
+        raise HTTPException(422, "empty_file")
+
+    item_id = str(uuid4())
+    storage_key = f"{project_id}/commercial-materials/{item_id}{suffix}"
+    root = settings.storage_dir.resolve()
+    destination = (root / storage_key).resolve()
+    if root not in destination.parents:
+        raise HTTPException(422, "invalid_storage_path")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    item = CommercialMaterial(
+        id=item_id, project_id=project_id, original_name=name[:300], storage_key=storage_key,
+        media_kind=kind, content_type=content_type, size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(), rights_status=rights_status,
+    )
+    db.add(item)
+    if stage:
+        brief = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
+        if brief:
+            brief.revision += 1
+            brief.status = "draft"
+        stage.status = "running"
+        stage.version += 1
+        stage.stale = False
+        stage.decision = {}
+    audit(db, project_id, "commercial_material.uploaded", item.id, {
+        "media_kind": kind, "size_bytes": len(content), "sha256": item.sha256,
+        "rights_status": rights_status,
+    })
+    try:
+        db.commit()
+        db.refresh(item)
+    except Exception:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    return safe_commercial_material(item)
+
+
+@router.get("/projects/{project_id}/commercial-materials/{material_id}/file")
+def get_commercial_material_file(project_id: str, material_id: str, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "commercial":
+        raise HTTPException(409, "commercial_materials_only_available_for_commercial_projects")
+    item = db.scalar(select(CommercialMaterial).where(
+        CommercialMaterial.id == material_id, CommercialMaterial.project_id == project_id
+    ))
+    if not item:
+        raise HTTPException(404, "commercial_material_not_found")
+    path = (settings.storage_dir.resolve() / item.storage_key).resolve()
+    if settings.storage_dir.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "commercial_material_file_not_found")
+    return FileResponse(path, media_type=item.content_type, filename=item.original_name)
+
+
 @router.post("/projects/{project_id}/stages/{stage_key}/decision")
 def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Session = Depends(get_db)):
     project_or_404(db, project_id)
@@ -471,6 +598,8 @@ def submit_stage_review(project_id: str, stage_key: str, db: Session = Depends(g
             raise HTTPException(422, "commercial_brief_must_be_saved_before_review")
         if not brief.rights_confirmed:
             raise HTTPException(422, "commercial_brief_rights_must_be_confirmed")
+        if not db.scalar(select(CommercialMaterial.id).where(CommercialMaterial.project_id == project_id)):
+            raise HTTPException(422, "commercial_brief_requires_at_least_one_material")
         brief.status = "needs_review"
     stage.status = "needs_review"
     audit(db, project_id, "stage.submitted_for_review", stage.id, {"stage_key": stage_key, "version": stage.version})

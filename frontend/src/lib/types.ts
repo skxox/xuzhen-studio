@@ -96,6 +96,19 @@ export interface CommercialBrief {
 
 export type CommercialBriefSaveInput = Omit<CommercialBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
 
+export interface CommercialMaterial {
+  id: string;
+  project_id: string;
+  original_name: string;
+  media_kind: 'image' | 'video' | 'document';
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  rights_status: 'owned' | 'licensed' | 'public_domain' | 'restricted';
+  created_at: string;
+  file_url: string;
+}
+
 export interface StageState {
   id: string;
   stage_key: string;

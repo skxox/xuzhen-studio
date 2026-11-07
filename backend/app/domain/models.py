@@ -98,6 +98,19 @@ class CommercialBrief(Timestamped, Base):
     status: Mapped[str] = mapped_column(String(24), default="draft")
 
 
+class CommercialMaterial(Timestamped, Base):
+    __tablename__ = "commercial_materials"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    original_name: Mapped[str] = mapped_column(String(300))
+    storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+    media_kind: Mapped[str] = mapped_column(String(24))
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    rights_status: Mapped[str] = mapped_column(String(24))
+
+
 class StageState(Timestamped, Base):
     __tablename__ = "stage_states"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

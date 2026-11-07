@@ -1,4 +1,4 @@
-import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CommercialBrief, CommercialBriefSaveInput, CreativeBrief, CreativeBriefSaveInput, GenerationJobSummary, Project, ProjectCreateInput, ServiceProfile, StageState } from './types';
+import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CommercialBrief, CommercialBriefSaveInput, CommercialMaterial, CreativeBrief, CreativeBriefSaveInput, GenerationJobSummary, Project, ProjectCreateInput, ServiceProfile, StageState } from './types';
 
 const API_ROOT = import.meta.env.VITE_API_ROOT ?? '/api';
 
@@ -29,6 +29,14 @@ export const api = {
   commercialBrief: (projectId: string) => request<CommercialBrief | null>(`/projects/${projectId}/commercial-brief`),
   saveCommercialBrief: (projectId: string, body: CommercialBriefSaveInput) =>
     request<CommercialBrief>(`/projects/${projectId}/commercial-brief`, { method: 'PUT', body: JSON.stringify(body) }),
+  commercialMaterials: (projectId: string) => request<CommercialMaterial[]>(`/projects/${projectId}/commercial-materials`),
+  uploadCommercialMaterial: async (projectId: string, file: File, rightsStatus: CommercialMaterial['rights_status']) => {
+    const form = new FormData(); form.append('file', file); form.append('rights_status', rightsStatus);
+    const response = await fetch(`${API_ROOT}/projects/${projectId}/commercial-materials`, { method: 'POST', body: form });
+    if (!response.ok) throw new Error((await response.text()) || `Upload failed (${response.status})`);
+    return response.json() as Promise<CommercialMaterial>;
+  },
+  commercialMaterialFileUrl: (projectId: string, materialId: string) => `${API_ROOT}/projects/${projectId}/commercial-materials/${materialId}/file`,
   stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   submitStageReview: (projectId: string, stage: string) =>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, ChevronRight, FileText, FolderInput, LockKeyhole, Plus, ShieldCheck, Sparkles, UploadCloud } from 'lucide-react';
 import type { Project } from '../lib/types';
@@ -16,7 +16,6 @@ export function SourcePage({ project }: { project?: Project }) {
   const chapters = useQuery({ queryKey: ['chapters', project?.id], queryFn: () => api.chapters(project!.id), enabled: Boolean(project?.id) });
   const upload = useMutation({ mutationFn: (file: File) => api.uploadChapters(project!.id, file), onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ['chapters', project?.id] }); setToast(`已解析 ${result.chapters.length} 个章节。导入内容仍待你确认章节顺序和权利状态。`); } });
   const original = project?.creation_mode === 'original';
-  useEffect(() => { if (project) setEntry(project.creation_mode === 'original' ? 'brief' : 'source'); }, [project?.id, project?.creation_mode]);
   return <div className="source-page">
     <PageHeading eyebrow={original ? 'ORIGINAL STORY' : 'SOURCE MANUSCRIPT'} title={original ? '从一句想法，写出一部小说。' : '先读懂原文，再开始改编。'} description={original ? '创意简报、故事圣经、章节计划与正文分批创作。每个版本可审阅，锁定后再交接视频制作。' : '导入已有作品，确认章节结构与权利，再建立带原文出处的改编依据。'} actions={<Badge tone={project?.rights_status === 'unconfirmed' ? 'gold' : 'green'} dot>{project?.rights_status === 'unconfirmed' ? '权利状态待确认' : '权利信息已记录'}</Badge>} />
     <div className="source-tabs"><button className={entry === 'source' ? 'is-active' : ''} onClick={() => setEntry('source')}><FolderInput size={15}/>已有小说改编</button><button className={entry === 'brief' ? 'is-active' : ''} onClick={() => setEntry('brief')}><Sparkles size={15}/>从创意原创</button></div>

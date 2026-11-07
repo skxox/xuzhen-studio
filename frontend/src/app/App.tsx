@@ -2,9 +2,9 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
-  Aperture, Archive, AudioLines, BookOpen, Boxes, Check, ChevronDown, Clapperboard,
-  Clock3, Film, FolderOpen, GalleryVerticalEnd, LayoutDashboard, Library, Plus,
-  Settings2, SlidersHorizontal, Sparkles, UserRound, Workflow,
+  BookOpen, Check, ChevronDown, Clapperboard, Clock3, Film, FolderOpen,
+  GalleryVerticalEnd, LayoutDashboard, Library, Plus, Settings2,
+  SlidersHorizontal, Sparkles, Workflow,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { CreationMode, Project, ProjectCreateInput } from '../lib/types';
@@ -31,19 +31,6 @@ const sections = [
   { to: '/canvas', label: '生成流程', icon: Workflow },
   { to: '/assets', label: '素材资产', icon: Library },
   { to: '/delivery', label: '审片交付', icon: Film },
-];
-
-const stageItems = [
-  { label: '原文 / 创意', icon: BookOpen, done: true },
-  { label: '改编大纲', icon: Sparkles, done: true },
-  { label: '角色设定', icon: UserRound, done: true },
-  { label: '美术设定', icon: Aperture, done: true },
-  { label: '分集剧本', icon: Clapperboard, done: true },
-  { label: '逐镜分镜', icon: GalleryVerticalEnd, current: true },
-  { label: '关键帧', icon: Boxes },
-  { label: '视频生成', icon: Film },
-  { label: '配音合成', icon: AudioLines },
-  { label: '交付审片', icon: Archive },
 ];
 
 function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -143,7 +130,7 @@ function AppShell() {
       </header>
       <main className="page-content"><Routes>
         <Route path="/" element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />} />
-        <Route path="/source" element={<SourcePage project={project} />} />
+        <Route path="/source" element={<SourcePage key={project?.id ?? 'demo'} project={project} />} />
         <Route path="/writing" element={<WritingPage />} />
         <Route path="/storyboard" element={<StoryboardPage />} />
         <Route path="/canvas" element={<CanvasPage />} />

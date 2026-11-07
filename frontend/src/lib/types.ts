@@ -1,4 +1,4 @@
-export type CreationMode = 'adaptation' | 'original';
+export type CreationMode = 'adaptation' | 'original' | 'commercial';
 export type ThemeName = 'dark' | 'light';
 
 export interface Project {
@@ -73,6 +73,28 @@ export interface CreativeBrief {
 }
 
 export type CreativeBriefSaveInput = Omit<CreativeBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
+
+export interface CommercialBrief {
+  id: string;
+  project_id: string;
+  product_name: string;
+  category: string;
+  product_facts: string;
+  target_audience: string;
+  selling_points: string[];
+  approved_claims: string[];
+  prohibited_claims: string[];
+  call_to_action: string;
+  distribution_channel: string;
+  target_seconds: number;
+  rights_confirmed: boolean;
+  revision: number;
+  status: 'draft' | 'needs_review' | 'accepted';
+  created_at: string;
+  updated_at: string;
+}
+
+export type CommercialBriefSaveInput = Omit<CommercialBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
 
 export interface StageState {
   id: string;

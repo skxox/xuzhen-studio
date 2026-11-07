@@ -1,4 +1,4 @@
-import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CreativeBrief, CreativeBriefSaveInput, GenerationJobSummary, Project, ProjectCreateInput, ServiceProfile, StageState } from './types';
+import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CommercialBrief, CommercialBriefSaveInput, CreativeBrief, CreativeBriefSaveInput, GenerationJobSummary, Project, ProjectCreateInput, ServiceProfile, StageState } from './types';
 
 const API_ROOT = import.meta.env.VITE_API_ROOT ?? '/api';
 
@@ -26,6 +26,9 @@ export const api = {
   creativeBrief: (projectId: string) => request<CreativeBrief | null>(`/projects/${projectId}/creative-brief`),
   saveCreativeBrief: (projectId: string, body: CreativeBriefSaveInput) =>
     request<CreativeBrief>(`/projects/${projectId}/creative-brief`, { method: 'PUT', body: JSON.stringify(body) }),
+  commercialBrief: (projectId: string) => request<CommercialBrief | null>(`/projects/${projectId}/commercial-brief`),
+  saveCommercialBrief: (projectId: string, body: CommercialBriefSaveInput) =>
+    request<CommercialBrief>(`/projects/${projectId}/commercial-brief`, { method: 'PUT', body: JSON.stringify(body) }),
   stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   submitStageReview: (projectId: string, stage: string) =>

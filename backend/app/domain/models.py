@@ -79,6 +79,25 @@ class CreativeBrief(Timestamped, Base):
     status: Mapped[str] = mapped_column(String(24), default="draft")
 
 
+class CommercialBrief(Timestamped, Base):
+    __tablename__ = "commercial_briefs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    product_name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(200))
+    product_facts: Mapped[str] = mapped_column(Text)
+    target_audience: Mapped[str] = mapped_column(Text)
+    selling_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    approved_claims: Mapped[list[str]] = mapped_column(JSON, default=list)
+    prohibited_claims: Mapped[list[str]] = mapped_column(JSON, default=list)
+    call_to_action: Mapped[str] = mapped_column(String(500))
+    distribution_channel: Mapped[str] = mapped_column(String(200))
+    target_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    rights_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+
+
 class StageState(Timestamped, Base):
     __tablename__ = "stage_states"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

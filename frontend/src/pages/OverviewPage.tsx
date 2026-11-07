@@ -12,7 +12,7 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
     <PageHeading eyebrow="PRODUCTION JOURNAL · 01" title="让每个镜头，都有来处。" description="从小说证据到画面候选，叙帧把创作决定、来源和版本留在同一条可审阅的生产线上。"
       actions={<Button variant="primary" icon={<Plus size={15}/>} onClick={onCreate}>新建制作项目</Button>} />
     {!project && <div className="demo-banner"><span><Sparkles size={16}/></span><div><b>欢迎来到叙帧工作台</b><p>当前展示的是本地演示工作区。创建项目后，项目与原文将保存到已连接的 API。</p></div><Button size="sm" onClick={onCreate}>创建第一个项目 <ArrowRight size={14}/></Button></div>}
-    {project && <div className="project-banner"><div className="project-monogram">{project.name.slice(0, 1)}</div><div><Badge tone="green" dot>制作中</Badge><h2>{project.name}</h2><p>{project.genre || '未设题材'} <span>·</span> {project.target_episodes || 12} 集 <span>·</span> {project.creation_mode === 'original' ? '原创小说' : '小说改编'}</p></div><Link className="banner-link" to="/source">进入项目 <ArrowRight size={15}/></Link></div>}
+    {project && <div className="project-banner"><div className="project-monogram">{project.name.slice(0, 1)}</div><div><Badge tone="green" dot>制作中</Badge><h2>{project.name}</h2><p>{project.genre || '未设题材'} <span>·</span> {project.target_episodes || 12} 集 <span>·</span> {project.creation_mode === 'original' ? '原创小说' : project.creation_mode === 'commercial' ? '商品短片' : '小说改编'}</p></div><Link className="banner-link" to="/source">进入项目 <ArrowRight size={15}/></Link></div>}
     <section className="overview-stats" aria-label="项目制作概况">
       <StatCard label="制作进度" value="42%" detail="3 / 8 阶段已验收" icon={<Check size={17}/>} tone="gold" progress={42}/>
       <StatCard label="待审候选" value="12" detail="4 个镜头 · 8 张关键帧" icon={<FolderOpen size={17}/>} tone="violet" />

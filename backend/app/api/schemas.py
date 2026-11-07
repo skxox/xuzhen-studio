@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    creation_mode: Literal["adaptation", "original"]
+    creation_mode: Literal["adaptation", "original", "commercial"]
     genre: str | None = None
     target_episodes: int | None = Field(default=None, ge=1, le=500)
     episode_seconds: int | None = Field(default=None, ge=10, le=7200)
@@ -54,6 +54,35 @@ class CreativeBriefSave(BaseModel):
     @classmethod
     def normalize_text(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+
+class CommercialBriefSave(BaseModel):
+    product_name: str = Field(min_length=1, max_length=200)
+    category: str = Field(min_length=1, max_length=200)
+    product_facts: str = Field(min_length=1, max_length=5000)
+    target_audience: str = Field(min_length=1, max_length=2000)
+    selling_points: list[str] = Field(min_length=1, max_length=12)
+    approved_claims: list[str] = Field(default_factory=list, max_length=20)
+    prohibited_claims: list[str] = Field(default_factory=list, max_length=20)
+    call_to_action: str = Field(min_length=1, max_length=500)
+    distribution_channel: str = Field(min_length=1, max_length=200)
+    target_seconds: int = Field(ge=5, le=600)
+    rights_confirmed: bool = False
+
+    @field_validator(
+        "product_name", "category", "product_facts", "target_audience", "call_to_action", "distribution_channel",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("selling_points", "approved_claims", "prohibited_claims", mode="before")
+    @classmethod
+    def normalize_lists(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return value
 
 
 class ServiceProfileCreate(BaseModel):

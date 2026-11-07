@@ -12,6 +12,7 @@ from ..domain.models import (
     AuditEvent,
     CharacterReference,
     Chapter,
+    CommercialBrief,
     CreativeBrief,
     GenerationJob,
     Project,
@@ -22,6 +23,7 @@ from ..infrastructure.database import SessionLocal
 from .schemas import (
     CharacterReferenceCreate,
     ChapterCreate,
+    CommercialBriefSave,
     CreativeBriefSave,
     GateDecision,
     JobCreate,
@@ -31,16 +33,18 @@ from .schemas import (
 
 VIDEO_STAGES = ("source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
 NOVEL_STAGES = ("creativeBrief", "storyBible", "novelOutline", "literaryCharacters", "novelDraft", "continuity", "manuscriptRelease", "source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
+COMMERCIAL_STAGES = ("commercialBrief", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
 DEPENDENCIES = {
     "source": (), "outline": ("source",), "characters": ("outline",), "art": ("outline",),
     "script": ("outline", "characters", "art"), "shotDesign": ("script", "characters", "art"),
     "keyframes": ("shotDesign",), "video": ("shotDesign", "keyframes"), "post": ("video",),
-    "delivery": ("post",), "creativeBrief": (), "storyBible": ("creativeBrief",),
+    "delivery": ("post",), "creativeBrief": (), "commercialBrief": (), "storyBible": ("creativeBrief",),
     "novelOutline": ("storyBible",), "literaryCharacters": ("storyBible",),
     "novelDraft": ("novelOutline", "literaryCharacters"), "continuity": ("novelDraft",),
     "manuscriptRelease": ("continuity",),
 }
 STAGE_METADATA = {
+    "commercialBrief": ("商品与素材简报", "产品策划", "产品事实、受众、卖点、宣传边界与投放目标"),
     "creativeBrief": ("创意简报", "创作规划", "故事 premise、题材与创作边界"),
     "storyBible": ("故事圣经", "故事设计", "世界规则、人物弧与冲突引擎"),
     "novelOutline": ("长篇大纲", "长篇规划", "分卷与章节卡"),
@@ -92,6 +96,8 @@ def project_or_404(db: Session, project_id: str) -> Project:
 
 
 def stage_dependencies(project: Project, stage_key: str) -> tuple[str, ...]:
+    if stage_key == "outline" and project.creation_mode == "commercial":
+        return ("commercialBrief",)
     if stage_key == "source" and project.creation_mode == "original":
         return ("manuscriptRelease",)
     return DEPENDENCIES.get(stage_key, ())
@@ -120,6 +126,19 @@ def safe_creative_brief(item: CreativeBrief):
             "status": item.status, "created_at": item.created_at, "updated_at": item.updated_at}
 
 
+def safe_commercial_brief(item: CommercialBrief):
+    return {
+        "id": item.id, "project_id": item.project_id, "product_name": item.product_name,
+        "category": item.category, "product_facts": item.product_facts,
+        "target_audience": item.target_audience, "selling_points": item.selling_points,
+        "approved_claims": item.approved_claims, "prohibited_claims": item.prohibited_claims,
+        "call_to_action": item.call_to_action, "distribution_channel": item.distribution_channel,
+        "target_seconds": item.target_seconds, "rights_confirmed": item.rights_confirmed,
+        "revision": item.revision, "status": item.status,
+        "created_at": item.created_at, "updated_at": item.updated_at,
+    }
+
+
 @router.get("/health")
 def health():
     return {"status": "ok", "service": "xuzhen-studio-api"}
@@ -130,8 +149,8 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
     p = Project(**data.model_dump())
     db.add(p)
     db.flush()
-    path = NOVEL_STAGES if p.creation_mode == "original" else VIDEO_STAGES
-    first_stage = "creativeBrief" if p.creation_mode == "original" else "source"
+    path = NOVEL_STAGES if p.creation_mode == "original" else COMMERCIAL_STAGES if p.creation_mode == "commercial" else VIDEO_STAGES
+    first_stage = "creativeBrief" if p.creation_mode == "original" else "commercialBrief" if p.creation_mode == "commercial" else "source"
     for key in path:
         db.add(StageState(project_id=p.id, stage_key=key, status="ready" if key == first_stage else "not_started"))
     audit(db, p.id, "project.created", p.id, {"creation_mode": p.creation_mode})
@@ -304,6 +323,50 @@ def save_creative_brief(
     return safe_creative_brief(item)
 
 
+@router.get("/projects/{project_id}/commercial-brief")
+def get_commercial_brief(project_id: str, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "commercial":
+        raise HTTPException(409, "commercial_brief_only_available_for_commercial_projects")
+    item = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
+    return safe_commercial_brief(item) if item else None
+
+
+@router.put("/projects/{project_id}/commercial-brief")
+def save_commercial_brief(project_id: str, data: CommercialBriefSave, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "commercial":
+        raise HTTPException(409, "commercial_brief_only_available_for_commercial_projects")
+    stage = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "commercialBrief"
+    ))
+    if not stage:
+        raise HTTPException(404, "commercial_brief_stage_not_found")
+    if stage.status == "needs_review":
+        raise HTTPException(409, "commercial_brief_locked_during_review")
+    item = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
+    if item:
+        for field, value in data.model_dump().items():
+            setattr(item, field, value)
+        item.revision += 1
+    else:
+        item = CommercialBrief(project_id=project_id, **data.model_dump())
+        db.add(item)
+        db.flush()
+    item.status = "draft"
+    stage.status = "running"
+    stage.version += 1
+    stage.stale = False
+    stage.decision = {}
+    audit(db, project_id, "commercial_brief.saved", item.id, {
+        "revision": item.revision, "rights_confirmed": item.rights_confirmed,
+        "selling_point_count": len(item.selling_points),
+    })
+    db.commit()
+    db.refresh(item)
+    return safe_commercial_brief(item)
+
+
 @router.post("/projects/{project_id}/stages/{stage_key}/decision")
 def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Session = Depends(get_db)):
     project_or_404(db, project_id)
@@ -314,6 +377,8 @@ def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Sessio
         raise HTTPException(409, "stage_must_be_in_needs_review_before_decision")
     if stage_key == "creativeBrief" and data.action == "waive":
         raise HTTPException(422, "creative_brief_cannot_be_waived")
+    if stage_key == "commercialBrief" and data.action == "waive":
+        raise HTTPException(422, "commercial_brief_cannot_be_waived")
     if data.action in {"waive", "reject"} and not data.reason:
         raise HTTPException(422, "reason_required")
     if data.action == "waive" and not data.risk_ack:
@@ -348,6 +413,10 @@ def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Sessio
     stage.decision = {"action": data.action, "reason": data.reason, "risk_ack": data.risk_ack}
     if stage_key == "creativeBrief":
         brief = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
+        if brief:
+            brief.status = "accepted" if data.action == "accept" else "draft"
+    if stage_key == "commercialBrief":
+        brief = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
         if brief:
             brief.status = "accepted" if data.action == "accept" else "draft"
     audit(db, project_id, "stage.decision", stage.id, stage.decision)
@@ -395,6 +464,13 @@ def submit_stage_review(project_id: str, stage_key: str, db: Session = Depends(g
             raise HTTPException(422, "creative_brief_must_be_saved_before_review")
         if not brief.rights_confirmed:
             raise HTTPException(422, "creative_brief_rights_must_be_confirmed")
+        brief.status = "needs_review"
+    if stage_key == "commercialBrief":
+        brief = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
+        if not brief:
+            raise HTTPException(422, "commercial_brief_must_be_saved_before_review")
+        if not brief.rights_confirmed:
+            raise HTTPException(422, "commercial_brief_rights_must_be_confirmed")
         brief.status = "needs_review"
     stage.status = "needs_review"
     audit(db, project_id, "stage.submitted_for_review", stage.id, {"stage_key": stage_key, "version": stage.version})

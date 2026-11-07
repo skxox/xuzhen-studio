@@ -15,7 +15,7 @@ type StageFlowNode = Node<StageNodeData, 'stage'>;
 const nodeTypes = { stage: StageNodeCard };
 
 const stageRoutes: Record<string, string> = {
-  creativeBrief: '/source', storyBible: '/source', novelOutline: '/writing', literaryCharacters: '/assets',
+  commercialBrief: '/source', creativeBrief: '/source', storyBible: '/source', novelOutline: '/writing', literaryCharacters: '/assets',
   novelDraft: '/writing', continuity: '/writing', manuscriptRelease: '/source', source: '/source',
   outline: '/writing', characters: '/assets', art: '/assets', script: '/writing', shotDesign: '/storyboard',
   keyframes: '/storyboard', video: '/storyboard', post: '/delivery', delivery: '/delivery',

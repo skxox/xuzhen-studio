@@ -6,6 +6,7 @@ import { App } from './app/App';
 import { ThemeProvider } from './app/providers/ThemeProvider';
 import './styles/tokens.css';
 import './styles/global.css';
+import '@xyflow/react/dist/style.css';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } },

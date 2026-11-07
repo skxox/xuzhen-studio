@@ -77,10 +77,25 @@ export type CreativeBriefSaveInput = Omit<CreativeBrief, 'id' | 'project_id' | '
 export interface StageState {
   id: string;
   stage_key: string;
+  label: string;
+  responsibility: string;
+  expected_output: string;
+  depends_on: string[];
   status: 'not_started' | 'ready' | 'running' | 'needs_review' | 'accepted' | 'waived' | 'blocked' | 'stale' | 'failed';
   version: number;
   stale: boolean;
   decision: Record<string, unknown>;
+}
+
+export interface GenerationJobSummary {
+  id: string;
+  modality: 'text' | 'image' | 'video' | 'audio';
+  stage_key: string;
+  status: string;
+  input_snapshot: Record<string, unknown>;
+  provider_snapshot: Record<string, unknown>;
+  error: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface ServiceProfile {

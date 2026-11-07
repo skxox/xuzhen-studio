@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
@@ -14,7 +14,6 @@ import { Dialog } from '../components/ui/Dialog';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { AssetsPage } from '../pages/AssetsPage';
-import { CanvasPage } from '../pages/CanvasPage';
 import { DeliveryPage } from '../pages/DeliveryPage';
 import { OverviewPage } from '../pages/OverviewPage';
 import { SettingsPage } from '../pages/SettingsPage';
@@ -22,6 +21,8 @@ import { SourcePage } from '../pages/SourcePage';
 import { StoryboardPage } from '../pages/StoryboardPage';
 import { WritingPage } from '../pages/WritingPage';
 import '../styles/workspace.css';
+
+const CanvasPage = lazy(() => import('../pages/CanvasPage').then(({ CanvasPage: page }) => ({ default: page })));
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -128,17 +129,17 @@ function AppShell() {
         <div className="breadcrumb"><span>制作空间</span><span className="breadcrumb-sep">/</span><b>{project?.name ?? '南汀岛的十一分钟'}</b><span className="breadcrumb-sep">/</span><strong>{title}</strong></div>
         <div className="topbar-tools"><Badge tone={healthQuery.isSuccess ? 'green' : 'neutral'} dot>{healthQuery.isSuccess ? 'API 已连接' : '演示工作区'}</Badge><span className="topbar-divider" /><button className="quiet-action"><Clock3 size={15} />最近保存于 2 分钟前</button><ThemeToggle /><Button variant="primary" size="sm" icon={<Plus size={15} />} onClick={() => setCreateOpen(true)}>新建项目</Button></div>
       </header>
-      <main className="page-content"><Routes>
+      <main className="page-content"><Suspense fallback={<div className="page-loading">正在载入流程观察台…</div>}><Routes>
         <Route path="/" element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />} />
         <Route path="/source" element={<SourcePage key={project?.id ?? 'demo'} project={project} />} />
         <Route path="/writing" element={<WritingPage />} />
         <Route path="/storyboard" element={<StoryboardPage />} />
-        <Route path="/canvas" element={<CanvasPage />} />
+        <Route path="/canvas" element={<CanvasPage project={project} />} />
         <Route path="/assets" element={<AssetsPage project={project} />} />
         <Route path="/delivery" element={<DeliveryPage />} />
         <Route path="/settings" element={<SettingsPage project={project} />} />
         <Route path="*" element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />} />
-      </Routes></main>
+      </Routes></Suspense></main>
     </div>
     <CreateProjectDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     <ProjectPickerDialog open={projectPickerOpen} projects={projects} activeId={project?.id} onClose={() => setProjectPickerOpen(false)} onSelect={(selected) => { setActiveProjectId(selected.id); localStorage.setItem('xuzhen.active-project', selected.id); setProjectPickerOpen(false); }} onCreate={() => setCreateOpen(true)} />

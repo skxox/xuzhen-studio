@@ -40,6 +40,25 @@ DEPENDENCIES = {
     "novelDraft": ("novelOutline", "literaryCharacters"), "continuity": ("novelDraft",),
     "manuscriptRelease": ("continuity",),
 }
+STAGE_METADATA = {
+    "creativeBrief": ("创意简报", "创作规划", "故事 premise、题材与创作边界"),
+    "storyBible": ("故事圣经", "故事设计", "世界规则、人物弧与冲突引擎"),
+    "novelOutline": ("长篇大纲", "长篇规划", "分卷与章节卡"),
+    "literaryCharacters": ("文学角色圣经", "角色分析", "身份、动机、关系与人物弧"),
+    "novelDraft": ("分批正文", "章节写作", "带版本的章节候选"),
+    "continuity": ("连续性审校", "连续性审校", "范围内 findings 与修订建议"),
+    "manuscriptRelease": ("原创稿锁版", "作者验收", "锁定的小说来源版本"),
+    "source": ("原文与创意来源", "来源分析", "章节结构、出处与权利快照"),
+    "outline": ("视频改编大纲", "改编规划", "分集卡与节拍映射"),
+    "characters": ("视频角色约束", "角色设计", "表演边界与视觉角色卡"),
+    "art": ("美术设定", "美术指导", "风格、场景与道具设定"),
+    "script": ("分集剧本", "剧本编写", "场次、动作与对白"),
+    "shotDesign": ("逐镜分镜", "分镜规划", "镜头、提示词与连续性 findings"),
+    "keyframes": ("关键帧生成", "图像生成", "可审阅的镜头关键帧"),
+    "video": ("逐镜视频生成", "视频生成", "逐镜视频候选"),
+    "post": ("声音与成片", "后期合成", "配音、字幕与合成版本"),
+    "delivery": ("审片与交付", "交付检查", "审片记录与交付 manifest"),
+}
 ALLOWED = {
     "not_started": {"ready", "blocked"}, "ready": {"running", "blocked"},
     "running": {"needs_review", "failed", "blocked"},
@@ -132,10 +151,20 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/stages")
 def get_stages(project_id: str, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
+    project = project_or_404(db, project_id)
     stages = db.scalars(select(StageState).where(StageState.project_id == project_id).order_by(StageState.created_at)).all()
-    return [{"id": s.id, "stage_key": s.stage_key, "status": s.status, "version": s.version,
-             "stale": s.stale, "decision": s.decision} for s in stages]
+    return [{
+        "id": stage.id,
+        "stage_key": stage.stage_key,
+        "label": STAGE_METADATA.get(stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物"))[0],
+        "responsibility": STAGE_METADATA.get(stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物"))[1],
+        "expected_output": STAGE_METADATA.get(stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物"))[2],
+        "depends_on": list(stage_dependencies(project, stage.stage_key)),
+        "status": stage.status,
+        "version": stage.version,
+        "stale": stage.stale,
+        "decision": stage.decision,
+    } for stage in stages]
 
 
 @router.post("/projects/{project_id}/chapters", status_code=201)
@@ -432,4 +461,5 @@ def list_jobs(project_id: str, db: Session = Depends(get_db)):
     project_or_404(db, project_id)
     rows = db.scalars(select(GenerationJob).where(GenerationJob.project_id == project_id).order_by(GenerationJob.created_at.desc())).all()
     return [{"id": j.id, "modality": j.modality, "stage_key": j.stage_key, "status": j.status,
-             "provider_snapshot": j.provider_snapshot, "error": j.error, "created_at": j.created_at} for j in rows]
+             "input_snapshot": j.input_snapshot, "provider_snapshot": j.provider_snapshot,
+             "error": j.error, "created_at": j.created_at} for j in rows]

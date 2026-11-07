@@ -1,37 +1,138 @@
-import { useState } from 'react';
-import { ArrowRight, BadgeCheck, Circle, GitBranch, MoreHorizontal, Plus, RefreshCw, Sparkles, Workflow } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { AlertCircle, ArrowUpRight, Check, Circle, Clock3, RefreshCw, Workflow } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { api } from '../lib/api';
+import type { GenerationJobSummary, Project, StageState } from '../lib/types';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { PageHeading, Panel } from '../components/ui/Panel';
 
-const nodes = [
-  { id: '01', title: '故事来源锁定', stage: 'SOURCE', state: 'complete', io: '18 章 · StorySource v07', icon: 'book', x: '4%', y: '20%' },
-  { id: '02', title: '视频改编大纲', stage: 'ADAPTATION', state: 'complete', io: '12 集卡 · Outline v04', icon: 'text', x: '25%', y: '20%' },
-  { id: '03', title: '角色 / 美术圣经', stage: 'DESIGN', state: 'complete', io: '6 角色 · 8 场景', icon: 'design', x: '48%', y: '9%' },
-  { id: '04', title: '分集剧本', stage: 'SCRIPT', state: 'complete', io: '第 3 集 · Script v12', icon: 'text', x: '48%', y: '44%' },
-  { id: '05', title: 'AI 拆镜计划', stage: 'SHOT PLAN', state: 'active', io: '4 Shot · 1 finding', icon: 'ai', x: '70%', y: '44%' },
-  { id: '06', title: '关键帧候选', stage: 'IMAGE', state: 'locked', io: '等待分镜门禁', icon: 'image', x: '88%', y: '9%' },
-  { id: '07', title: '逐镜视频', stage: 'VIDEO', state: 'locked', io: '等待关键帧验收', icon: 'video', x: '88%', y: '68%' },
-  { id: '08', title: '配音 / 成片', stage: 'DELIVERY', state: 'locked', io: '等待视频候选', icon: 'export', x: '70%', y: '78%' },
-];
+type StageNodeData = { stage: StageState; job?: GenerationJobSummary };
+type StageFlowNode = Node<StageNodeData, 'stage'>;
 
-export function CanvasPage() {
-  const [notice, setNotice] = useState('');
-  return <div className="canvas-page"><PageHeading eyebrow="PRODUCTION GRAPH" title="制作流程，是可以被看见和调整的。" description="AI 先基于剧本与设定预拟生成计划。你可以审阅、改节点参数与引用，批准后才会执行；不需要手动画图才能生产。" actions={<><Badge tone="gold" dot>计划待审阅 · v03</Badge><Button variant="primary" icon={<BadgeCheck size={15}/>} onClick={() => setNotice('计划审批 API 尚未接入，当前画布只用于预览与交互评审。')}>批准计划</Button></>} />
-    <div className="canvas-toolbar"><div><span><span className="live-dot"/>AI 规划快照</span><span>·</span><span>来源：第 3 集剧本 v12</span><span>·</span><span>更新于 14:32</span></div><div><button className="quiet-action"><GitBranch size={14}/>依赖视图</button><button className="quiet-action"><RefreshCw size={14}/>重新规划</button><button className="plain-icon" aria-label="画布选项"><MoreHorizontal size={16}/></button></div></div>
-    <div className="canvas-layout"><Panel className="graph-panel"><div className="graph-world"><svg className="graph-connections" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-hidden="true"><path d="M155 188 C220 188 225 188 295 188"/><path d="M390 188 C465 188 456 104 520 104"/><path d="M390 188 C465 188 456 334 520 334"/><path d="M620 104 C695 104 680 334 745 334"/><path d="M620 334 C688 334 680 334 745 334"/><path d="M850 334 C910 334 884 110 920 110"/><path d="M850 334 C910 334 884 500 920 500"/><path d="M920 158 C920 310 920 352 920 448"/><path d="M850 500 C879 500 885 500 920 500"/></svg>
-      {nodes.map((node) => <div key={node.id} className={`graph-node graph-node--${node.state}`} style={{ left: node.x, top: node.y }}><div className="graph-node__head"><span>{node.state === 'complete' ? <BadgeCheck size={14}/> : node.state === 'active' ? <Sparkles size={14}/> : <Circle size={11}/>}</span><small>{node.stage}</small><button aria-label={`${node.title}选项`}><MoreHorizontal size={15}/></button></div><b>{node.title}</b><span className="graph-node__io">{node.io}</span><div className="graph-node__foot"><span>{node.state === 'complete' ? '已验收' : node.state === 'active' ? '待人工审阅' : '门禁锁定'}</span>{node.state === 'active' && <Link to="/storyboard">打开 <ArrowRight size={12}/></Link>}</div></div>)}
-      <button className="graph-add-node" style={{ left: '38%', top: '72%' }}><Plus size={13}/> 添加审阅步骤</button>
-      <div className="graph-legend"><span><i className="legend-dot is-complete"/>已确认</span><span><i className="legend-dot is-active"/>待审阅</span><span><i className="legend-dot is-locked"/>未解锁</span></div>
-    </div></Panel>
-      <aside className="graph-inspector"><Panel className="plan-card"><div className="eyebrow">AI-PROPOSED PLAN</div><h3>第 4 集 · 生成计划</h3><p>剧本中的 4 个节拍已展开成 4 个镜头。计划使用已确认的林澄角色卡与气象站场景素材，不会越过门禁自动开始图像或视频生成。</p><div className="plan-stats"><span><b>4</b><small>镜头</small></span><span><b>2</b><small>参考素材</small></span><span><b>1</b><small>待复核 finding</small></span></div><div className="plan-checks"><PlanCheck title="剧本版本锁定" detail="Script v04"/><PlanCheck title="关键节拍已覆盖" detail="4 / 4"/><PlanCheck title="时间线连续性" detail="1 项需确认" warn/><PlanCheck title="服务权限与能力" detail="视频服务未配置" warn/></div><div className="plan-actions"><Button variant="primary">审阅计划修改</Button><Button>保存为分镜草稿</Button></div></Panel>
-      <Panel className="graph-help"><Workflow size={16}/><div><b>人工控制点</b><p>节点可以重排和改参数；连线说明依赖。被锁定的下游节点不能绕过阶段验收。</p><button className="text-link">阅读画布规则 <ArrowRight size={13}/></button></div></Panel></aside>
-    </div>
-    {notice && <div className="toast" role="status"><span className="toast-mark">!</span>{notice}<button onClick={() => setNotice('')} aria-label="关闭">×</button></div>}
+const nodeTypes = { stage: StageNodeCard };
+
+const stageRoutes: Record<string, string> = {
+  creativeBrief: '/source', storyBible: '/source', novelOutline: '/writing', literaryCharacters: '/assets',
+  novelDraft: '/writing', continuity: '/writing', manuscriptRelease: '/source', source: '/source',
+  outline: '/writing', characters: '/assets', art: '/assets', script: '/writing', shotDesign: '/storyboard',
+  keyframes: '/storyboard', video: '/storyboard', post: '/delivery', delivery: '/delivery',
+};
+
+export function CanvasPage({ project }: { project?: Project }) {
+  const [selectedKey, setSelectedKey] = useState('');
+  const stagesQuery = useQuery({ queryKey: ['stages', project?.id], queryFn: () => api.stages(project!.id), enabled: Boolean(project?.id), retry: false });
+  const jobsQuery = useQuery({ queryKey: ['jobs', project?.id], queryFn: () => api.jobs(project!.id), enabled: Boolean(project?.id), retry: false });
+  const graph = useMemo(() => buildGraph(stagesQuery.data ?? [], jobsQuery.data ?? []), [stagesQuery.data, jobsQuery.data]);
+  const selected = graph.stages.find((stage) => stage.stage_key === selectedKey)
+    ?? graph.stages.find((stage) => stage.status === 'needs_review')
+    ?? graph.stages.find((stage) => stage.status === 'running')
+    ?? graph.stages[0];
+  const selectedJob = selected ? graph.jobsByStage.get(selected.stage_key) : undefined;
+  const waitingCount = graph.stages.filter((stage) => stage.status === 'needs_review').length;
+  const runningCount = graph.stages.filter((stage) => stage.status === 'running').length;
+  const refresh = () => { void stagesQuery.refetch(); void jobsQuery.refetch(); };
+
+  return <div className="canvas-page">
+    <PageHeading eyebrow="PRODUCTION GRAPH · OBSERVABILITY" title="制作流程运行观察台。" description="流程节点和依赖来自服务端阶段定义；这里观察运行与审阅状态，不要求人工搭图。选择节点可查看输入快照、参数、审阅决定和阶段产物记录。" actions={<><Badge tone={waitingCount ? 'gold' : runningCount ? 'blue' : 'green'} dot>{waitingCount ? `${waitingCount} 项待人工审阅` : runningCount ? `${runningCount} 个阶段执行中` : '阶段状态已同步'}</Badge><Button icon={<RefreshCw size={14}/>} onClick={refresh} disabled={!project || stagesQuery.isFetching || jobsQuery.isFetching}>{stagesQuery.isFetching || jobsQuery.isFetching ? '同步中…' : '同步状态'}</Button></>} />
+    <div className="canvas-toolbar"><div><span><span className="live-dot"/>服务端阶段图</span><span>·</span><span>{project?.name ?? '未选择项目'}</span><span>·</span><span>{graph.stages.length} 个生产阶段</span><span>·</span><span>{graph.jobs.length} 个生成任务</span></div><div><span className="canvas-readonly"><Workflow size={14}/>只读执行视图 · 依赖由工作流定义维护</span></div></div>
+    {!project ? <Panel className="canvas-empty"><Workflow size={22}/><b>先选择一个制作项目</b><span>项目创建后，画布会按小说创作或小说改编流程读取阶段与依赖。</span><Link to="/">返回制片总览 <ArrowUpRight size={13}/></Link></Panel> : stagesQuery.isLoading ? <Panel className="canvas-empty"><span className="live-dot"/><b>正在读取项目工作流…</b></Panel> : stagesQuery.isError ? <Panel className="canvas-empty canvas-empty--error"><AlertCircle size={20}/><b>工作流状态读取失败</b><span>{stagesQuery.error.message}</span><Button onClick={refresh}>重试</Button></Panel> : !graph.stages.length ? <Panel className="canvas-empty"><b>项目还没有阶段定义</b><span>请刷新项目或检查后端工作流初始化状态。</span></Panel> : <>
+      {jobsQuery.isError && <div className="inline-notice" role="status">生成任务列表暂不可用：{jobsQuery.error.message}。节点仍显示已读取的阶段状态。</div>}
+      <div className="canvas-layout"><Panel className="graph-panel"><div className="flow-canvas" aria-label="制作流程节点画布">
+        <ReactFlow<StageFlowNode, Edge> nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} onNodeClick={(_, node) => setSelectedKey(node.data.stage.stage_key)} fitView fitViewOptions={{ padding: 0.16, minZoom: 0.3, maxZoom: 0.9 }} minZoom={0.22} maxZoom={1.3} nodesDraggable={false} nodesConnectable={false} elementsSelectable panOnScroll zoomOnDoubleClick={false} proOptions={{ hideAttribution: true }}>
+          <Background variant={BackgroundVariant.Dots} gap={19} size={1} color="var(--canvas-dot)" />
+          <Controls position="bottom-left" showInteractive={false}/>
+          <MiniMap position="bottom-right" pannable zoomable nodeColor={(node) => statusColor((node.data as StageNodeData).stage.status)}/>
+        </ReactFlow>
+        <div className="flow-legend"><span><i className="is-accepted"/>已验收</span><span><i className="is-running"/>执行中</span><span><i className="is-review"/>等待人工审阅</span><span><i className="is-locked"/>未解锁</span></div>
+      </div></Panel>
+        <StageInspector stage={selected} job={selectedJob}/>
+      </div>
+    </>}
   </div>;
 }
 
-function PlanCheck({ title, detail, warn }: { title: string; detail: string; warn?: boolean }) {
-  return <div className={`plan-check ${warn ? 'has-warning' : ''}`}><span>{warn ? '!' : '✓'}</span><b>{title}</b><small>{detail}</small></div>;
+function StageNodeCard({ data, selected }: NodeProps<StageFlowNode>) {
+  const { stage, job } = data;
+  const status = statusLabel(stage.status);
+  return <div className={`stage-node stage-node--${stage.status} ${selected ? 'is-selected' : ''}`}>
+    <Handle type="target" position={Position.Left} className="stage-node__handle" />
+    <div className="stage-node__top"><span className="stage-node__status">{stage.status === 'accepted' ? <Check size={13}/> : stage.status === 'needs_review' ? <AlertCircle size={13}/> : stage.status === 'running' ? <Clock3 size={13}/> : <Circle size={11}/>}</span><span className="stage-node__key">{stage.stage_key}</span><Badge tone={status.tone}>{status.label}</Badge></div>
+    <b>{stage.label}</b><span className="stage-node__role">{stage.responsibility}</span>
+    <div className="stage-node__bottom"><span>v{String(stage.version).padStart(2, '0')}{stage.stale ? ' · 已过期' : ''}</span><span>{job ? `任务 ${job.status}` : stage.expected_output}</span></div>
+    <Handle type="source" position={Position.Right} className="stage-node__handle" />
+  </div>;
+}
+
+function StageInspector({ stage, job }: { stage?: StageState; job?: GenerationJobSummary }) {
+  if (!stage) return <aside className="graph-inspector"><Panel className="stage-inspector"><b>选择一个阶段节点</b><span>阶段详情将在此处显示。</span></Panel></aside>;
+  const route = stageRoutes[stage.stage_key] ?? '/';
+  const status = statusLabel(stage.status);
+  const params = job?.input_snapshot.parameters;
+  return <aside className="graph-inspector"><Panel className="stage-inspector">
+    <div className="panel-heading"><div><div className="eyebrow">{stage.stage_key} · VERSION {String(stage.version).padStart(2, '0')}</div><h3>{stage.label}</h3><p>{stage.responsibility}</p></div><Badge tone={status.tone} dot>{status.label}</Badge></div>
+    {stage.status === 'needs_review' && <div className="stage-review-alert"><AlertCircle size={15}/><span><b>等待人工审阅</b><small>下游阶段保持锁定，需先在阶段工作区确认或退回候选。</small></span></div>}
+    <section className="inspector-block"><h4>节点职责与产物契约</h4><p>{stage.expected_output}</p></section>
+    <section className="inspector-block"><h4>依赖阶段</h4>{stage.depends_on.length ? <div className="dependency-list">{stage.depends_on.map((key) => <span key={key}>{graphLabel(key)}</span>)}</div> : <p>无上游依赖</p>}</section>
+    <section className="inspector-block"><h4>最近运行输入与参数</h4>{job ? <><div className="job-meta"><Badge tone={job.status === 'blocked' || job.status === 'failed' ? 'red' : 'blue'}>{job.modality} · {job.status}</Badge><small>{new Date(job.created_at).toLocaleString()}</small></div><pre className="snapshot-json">{formatJson(job.input_snapshot)}</pre><details className="snapshot-details"><summary>Provider 快照</summary><pre className="snapshot-json">{formatJson(job.provider_snapshot)}</pre></details></> : <p>本阶段尚无生成任务记录；执行输入与参数会在任务提交后显示。</p>}{params !== undefined && <span className="snapshot-caption">参数包含在输入快照中</span>}</section>
+    <section className="inspector-block"><h4>输出 / 审阅决定</h4>{stage.decision && Object.keys(stage.decision).length ? <pre className="snapshot-json">{formatJson(stage.decision)}</pre> : <p>暂无持久化输出候选。模型与媒体执行器接入后，这里显示节点输出、产物引用和校验结果。</p>}{job?.error && Object.keys(job.error).length > 0 && <div className="job-error"><b>最近任务错误</b><pre>{formatJson(job.error)}</pre></div>}</section>
+    <div className="stage-inspector__footer"><Link className="button button--sm" to={route}>打开阶段工作区 <ArrowUpRight size={13}/></Link><span>画布只读；节点编辑在对应阶段页面完成。</span></div>
+  </Panel></aside>;
+}
+
+function buildGraph(stages: StageState[], jobs: GenerationJobSummary[]) {
+  const jobsByStage = new Map<string, GenerationJobSummary>();
+  for (const job of jobs) if (!jobsByStage.has(job.stage_key)) jobsByStage.set(job.stage_key, job);
+  const ranks = new Map(stages.map((stage) => [stage.stage_key, 0]));
+  for (let iteration = 0; iteration < stages.length; iteration += 1) {
+    for (const stage of stages) {
+      const parents = stage.depends_on.map((key) => ranks.get(key)).filter((rank): rank is number => rank !== undefined);
+      if (parents.length) ranks.set(stage.stage_key, Math.max(...parents) + 1);
+    }
+  }
+  const columns = new Map<number, StageState[]>();
+  for (const stage of stages) {
+    const rank = ranks.get(stage.stage_key) ?? 0;
+    columns.set(rank, [...(columns.get(rank) ?? []), stage]);
+  }
+  const nodes: StageFlowNode[] = stages.map((stage) => {
+    const rank = ranks.get(stage.stage_key) ?? 0;
+    const column = columns.get(rank) ?? [stage];
+    const row = column.findIndex((item) => item.stage_key === stage.stage_key);
+    return { id: stage.stage_key, type: 'stage', position: { x: rank * 290, y: row * 190 }, data: { stage, job: jobsByStage.get(stage.stage_key) } };
+  });
+  const edges: Edge[] = stages.flatMap((stage) => stage.depends_on.filter((dependency) => stages.some((item) => item.stage_key === dependency)).map((dependency) => ({
+    id: `${dependency}--${stage.stage_key}`, source: dependency, target: stage.stage_key, type: 'smoothstep',
+    animated: stage.status === 'running' || stage.status === 'needs_review',
+    className: stage.status === 'needs_review' ? 'flow-edge--review' : undefined,
+  })));
+  return { stages, jobs, jobsByStage, nodes, edges };
+}
+
+function statusLabel(status: StageState['status']): { label: string; tone: 'green' | 'blue' | 'gold' | 'red' | 'neutral' } {
+  const values: Record<StageState['status'], { label: string; tone: 'green' | 'blue' | 'gold' | 'red' | 'neutral' }> = {
+    not_started: { label: '未解锁', tone: 'neutral' }, ready: { label: '可开始', tone: 'blue' },
+    running: { label: '执行中', tone: 'blue' }, needs_review: { label: '待审阅', tone: 'gold' },
+    accepted: { label: '已验收', tone: 'green' }, waived: { label: '已豁免', tone: 'gold' },
+    blocked: { label: '已阻塞', tone: 'red' }, stale: { label: '已过期', tone: 'gold' }, failed: { label: '失败', tone: 'red' },
+  };
+  return values[status];
+}
+
+function statusColor(status: StageState['status']): string {
+  if (status === 'accepted') return 'var(--green)';
+  if (status === 'needs_review' || status === 'stale' || status === 'waived') return 'var(--accent)';
+  if (status === 'running' || status === 'ready') return 'var(--blue)';
+  if (status === 'blocked' || status === 'failed') return 'var(--red)';
+  return 'var(--subtle)';
+}
+
+function formatJson(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function graphLabel(stageKey: string): string {
+  return stageKey.replace(/([A-Z])/g, ' $1');
 }

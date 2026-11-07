@@ -1,4 +1,4 @@
-import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CreativeBrief, CreativeBriefSaveInput, Project, ProjectCreateInput, ServiceProfile } from './types';
+import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, CreativeBrief, CreativeBriefSaveInput, Project, ProjectCreateInput, ServiceProfile, StageState } from './types';
 
 const API_ROOT = import.meta.env.VITE_API_ROOT ?? '/api';
 
@@ -26,6 +26,11 @@ export const api = {
   creativeBrief: (projectId: string) => request<CreativeBrief | null>(`/projects/${projectId}/creative-brief`),
   saveCreativeBrief: (projectId: string, body: CreativeBriefSaveInput) =>
     request<CreativeBrief>(`/projects/${projectId}/creative-brief`, { method: 'PUT', body: JSON.stringify(body) }),
+  stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
+  submitStageReview: (projectId: string, stage: string) =>
+    request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(`/projects/${projectId}/stages/${stage}/submit-review`, { method: 'POST' }),
+  decideStage: (projectId: string, stage: string, action: 'accept' | 'reject', reason?: string) =>
+    request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(`/projects/${projectId}/stages/${stage}/decision`, { method: 'POST', body: JSON.stringify({ action, reason }) }),
   uploadChapters: async (projectId: string, file: File) => {
     const form = new FormData(); form.append('file', file);
     const response = await fetch(`${API_ROOT}/projects/${projectId}/chapters/upload`, { method: 'POST', body: form });

@@ -74,6 +74,15 @@ export interface CreativeBrief {
 
 export type CreativeBriefSaveInput = Omit<CreativeBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
 
+export interface StageState {
+  id: string;
+  stage_key: string;
+  status: 'not_started' | 'ready' | 'running' | 'needs_review' | 'accepted' | 'waived' | 'blocked' | 'stale' | 'failed';
+  version: number;
+  stale: boolean;
+  decision: Record<string, unknown>;
+}
+
 export interface ServiceProfile {
   id: string;
   modality: string;

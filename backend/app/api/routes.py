@@ -245,6 +245,13 @@ def save_creative_brief(
     project = project_or_404(db, project_id)
     if project.creation_mode != "original":
         raise HTTPException(409, "creative_brief_only_available_for_original_projects")
+    stage = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "creativeBrief"
+    ))
+    if not stage:
+        raise HTTPException(404, "creative_brief_stage_not_found")
+    if stage.status == "needs_review":
+        raise HTTPException(409, "creative_brief_locked_during_review")
     item = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
     if item:
         for field, value in data.model_dump().items():
@@ -254,6 +261,11 @@ def save_creative_brief(
         item = CreativeBrief(project_id=project_id, **data.model_dump())
         db.add(item)
         db.flush()
+    item.status = "draft"
+    stage.status = "running"
+    stage.version += 1
+    stage.stale = False
+    stage.decision = {}
     audit(db, project_id, "creative_brief.saved", item.id, {
         "revision": item.revision, "rights_confirmed": item.rights_confirmed,
         "status": item.status,
@@ -303,6 +315,10 @@ def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Sessio
     stage.version += 1
     stage.stale = False
     stage.decision = {"action": data.action, "reason": data.reason, "risk_ack": data.risk_ack}
+    if stage_key == "creativeBrief":
+        brief = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
+        if brief:
+            brief.status = "accepted" if data.action == "accept" else "draft"
     audit(db, project_id, "stage.decision", stage.id, stage.decision)
     db.commit()
     return {"id": stage.id, "stage_key": stage_key, "status": stage.status, "version": stage.version, "decision": stage.decision}
@@ -342,6 +358,13 @@ def submit_stage_review(project_id: str, stage_key: str, db: Session = Depends(g
     if stage_key == "source":
         if not db.scalar(select(Chapter.id).where(Chapter.project_id == project_id)):
             raise HTTPException(422, "source_requires_at_least_one_chapter")
+    if stage_key == "creativeBrief":
+        brief = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
+        if not brief:
+            raise HTTPException(422, "creative_brief_must_be_saved_before_review")
+        if not brief.rights_confirmed:
+            raise HTTPException(422, "creative_brief_rights_must_be_confirmed")
+        brief.status = "needs_review"
     stage.status = "needs_review"
     audit(db, project_id, "stage.submitted_for_review", stage.id, {"stage_key": stage_key, "version": stage.version})
     db.commit()

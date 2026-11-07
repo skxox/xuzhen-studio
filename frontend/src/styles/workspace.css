@@ -410,6 +410,7 @@
 .reference-provider-note small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .asset-empty { display: grid; justify-items: center; gap: 8px; padding: 38px; margin-top: 14px; color: var(--muted); font-size: 11px; }
 .asset-empty b { color: var(--ink); font-size: 13px; }
+.brief-edit-fields { display: contents; padding: 0; margin: 0; border: 0; }
 .source-tabs button.is-active { color: var(--accent); }
 
 @media (max-width: 1080px) {

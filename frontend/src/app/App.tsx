@@ -64,7 +64,7 @@ function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => 
   return <Dialog open={open} onClose={onClose} title="建立制作项目" description="选择创作入口。后续可调整制作参数与服务路由。"
     footer={<><Button onClick={onClose}>取消</Button><Button variant="primary" type="submit" form="create-project-form" disabled={mutation.isPending}>{mutation.isPending ? '正在创建…' : '创建项目'}</Button></>}>
     <form id="create-project-form" onSubmit={submit} className="form-stack">
-      <Field label="项目名称"><TextInput autoFocus required maxLength={200} placeholder="例如：雾城来信" value={name} onChange={(event) => setName(event.target.value)} /></Field>
+      <Field label="项目名称"><TextInput autoFocus required maxLength={200} placeholder="例如：南汀岛的十一分钟" value={name} onChange={(event) => setName(event.target.value)} /></Field>
       <div className="field"><span className="field__label">从哪里开始</span><div className="choice-grid">
         <button type="button" className={`choice-card ${mode === 'adaptation' ? 'is-selected' : ''}`} onClick={() => setMode('adaptation')}>
           <BookOpen size={19} /><strong>已有小说改编</strong><span>导入原文，建立出处与改编映射</span>
@@ -101,8 +101,8 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
   const location = useLocation();
   const isStoryboard = location.pathname === '/storyboard';
   return <aside className="app-sidebar">
-    <div className="sidebar-brand"><div className="brand-stamp">叙</div><div><b>叙帧</b><small>STORY TO SCREEN</small></div><ChevronDown className="brand-chevron" size={14} /></div>
-    <button className="project-select" onClick={onSelectProject}><span className="project-select__avatar">{project?.name?.slice(0, 1) ?? '叙'}</span><span className="project-select__copy"><b>{project?.name ?? '示例制作项目'}</b><small>{project?.creation_mode === 'original' ? '原创小说' : '小说改编'} · 第 1 季</small></span><ChevronDown size={15} /></button>
+    <div className="sidebar-brand"><div className="brand-stamp">帧</div><div><b>叙帧</b><small>FIELD NOTES FOR STORY</small></div><ChevronDown className="brand-chevron" size={14} /></div>
+    <button className="project-select" onClick={onSelectProject}><span className="project-select__avatar">{project?.name?.slice(0, 1) ?? '南'}</span><span className="project-select__copy"><b>{project?.name ?? '南汀岛的十一分钟'}</b><small>{project?.creation_mode === 'original' ? '原创小说' : '小说改编'} · 第 1 季</small></span><ChevronDown size={15} /></button>
     <nav className="main-nav" aria-label="工作区">
       <div className="nav-caption">制作空间</div>
       {sections.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
@@ -111,7 +111,7 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
     </nav>
     <div className="episode-list">
       <div className="nav-caption episode-caption"><span>本季分集</span><button aria-label="新增分集"><Plus size={14} /></button></div>
-      {Array.from({ length: 8 }, (_, index) => <button key={index} className={`episode-row ${isStoryboard && index === 2 ? 'is-selected' : ''}`}>
+      {Array.from({ length: 8 }, (_, index) => <button key={index} className={`episode-row ${isStoryboard && index === 3 ? 'is-selected' : ''}`}>
         <span className="episode-dot">{index < 2 ? <Check size={10} /> : `0${index + 1}`}</span><span>E01-{String(index + 1).padStart(2, '0')}</span><small>{index < 2 ? '已验收' : `${3 + (index % 3)} 镜`}</small>
       </button>)}
       <button className="episode-more">查看全部 18 集 <ChevronDown size={13} /></button>
@@ -138,7 +138,7 @@ function AppShell() {
     <Sidebar project={project} onSelectProject={() => setProjectPickerOpen(true)} />
     <div className="app-main">
       <header className="topbar">
-        <div className="breadcrumb"><span>制作空间</span><span className="breadcrumb-sep">/</span><b>{project?.name ?? '雾城来信'}</b><span className="breadcrumb-sep">/</span><strong>{title}</strong></div>
+        <div className="breadcrumb"><span>制作空间</span><span className="breadcrumb-sep">/</span><b>{project?.name ?? '南汀岛的十一分钟'}</b><span className="breadcrumb-sep">/</span><strong>{title}</strong></div>
         <div className="topbar-tools"><Badge tone={healthQuery.isSuccess ? 'green' : 'neutral'} dot>{healthQuery.isSuccess ? 'API 已连接' : '演示工作区'}</Badge><span className="topbar-divider" /><button className="quiet-action"><Clock3 size={15} />最近保存于 2 分钟前</button><ThemeToggle /><Button variant="primary" size="sm" icon={<Plus size={15} />} onClick={() => setCreateOpen(true)}>新建项目</Button></div>
       </header>
       <main className="page-content"><Routes>

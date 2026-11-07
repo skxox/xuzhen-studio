@@ -25,7 +25,7 @@ export function CanvasPage() {
       <button className="graph-add-node" style={{ left: '38%', top: '72%' }}><Plus size={13}/> 添加审阅步骤</button>
       <div className="graph-legend"><span><i className="legend-dot is-complete"/>已确认</span><span><i className="legend-dot is-active"/>待审阅</span><span><i className="legend-dot is-locked"/>未解锁</span></div>
     </div></Panel>
-      <aside className="graph-inspector"><Panel className="plan-card"><div className="eyebrow">AI-PROPOSED PLAN</div><h3>第 3 集 · 生成计划</h3><p>剧本中的 4 个节拍已展开成 4 个镜头。计划使用已确认角色与宴会厅素材，不会越过门禁自动开始图像或视频生成。</p><div className="plan-stats"><span><b>4</b><small>镜头</small></span><span><b>2</b><small>参考素材</small></span><span><b>1</b><small>待复核 finding</small></span></div><div className="plan-checks"><PlanCheck title="剧本版本锁定" detail="Script v12"/><PlanCheck title="关键节拍已覆盖" detail="4 / 4"/><PlanCheck title="连续性检查" detail="1 项需确认" warn/><PlanCheck title="服务权限与能力" detail="视频服务未配置" warn/></div><div className="plan-actions"><Button variant="primary">审阅计划修改</Button><Button>保存为分镜草稿</Button></div></Panel>
+      <aside className="graph-inspector"><Panel className="plan-card"><div className="eyebrow">AI-PROPOSED PLAN</div><h3>第 4 集 · 生成计划</h3><p>剧本中的 4 个节拍已展开成 4 个镜头。计划使用已确认的林澄角色卡与气象站场景素材，不会越过门禁自动开始图像或视频生成。</p><div className="plan-stats"><span><b>4</b><small>镜头</small></span><span><b>2</b><small>参考素材</small></span><span><b>1</b><small>待复核 finding</small></span></div><div className="plan-checks"><PlanCheck title="剧本版本锁定" detail="Script v04"/><PlanCheck title="关键节拍已覆盖" detail="4 / 4"/><PlanCheck title="时间线连续性" detail="1 项需确认" warn/><PlanCheck title="服务权限与能力" detail="视频服务未配置" warn/></div><div className="plan-actions"><Button variant="primary">审阅计划修改</Button><Button>保存为分镜草稿</Button></div></Panel>
       <Panel className="graph-help"><Workflow size={16}/><div><b>人工控制点</b><p>节点可以重排和改参数；连线说明依赖。被锁定的下游节点不能绕过阶段验收。</p><button className="text-link">阅读画布规则 <ArrowRight size={13}/></button></div></Panel></aside>
     </div>
     {notice && <div className="toast" role="status"><span className="toast-mark">!</span>{notice}<button onClick={() => setNotice('')} aria-label="关闭">×</button></div>}
@@ -35,4 +35,3 @@ export function CanvasPage() {
 function PlanCheck({ title, detail, warn }: { title: string; detail: string; warn?: boolean }) {
   return <div className={`plan-check ${warn ? 'has-warning' : ''}`}><span>{warn ? '!' : '✓'}</span><b>{title}</b><small>{detail}</small></div>;
 }
-import { useState } from 'react';

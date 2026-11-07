@@ -1,0 +1,14 @@
+{
+  "name": "xuzhen-studio",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "packageManager": "pnpm@10.8.1",
+  "scripts": {
+    "dev": "pnpm --filter @xuzhen/studio dev",
+    "build": "pnpm --filter @xuzhen/studio build",
+    "typecheck": "pnpm --filter @xuzhen/studio typecheck",
+    "lint": "pnpm --filter @xuzhen/studio lint"
+  }
+}

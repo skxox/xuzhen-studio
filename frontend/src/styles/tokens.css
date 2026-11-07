@@ -1,0 +1,85 @@
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #151612;
+  --canvas-raised: #1a1b17;
+  --surface: #1e201b;
+  --surface-raised: #24261f;
+  --surface-hover: #292b23;
+  --sidebar: #11120f;
+  --line: rgba(231, 226, 209, 0.095);
+  --line-strong: rgba(231, 226, 209, 0.16);
+  --ink: #eeece4;
+  --ink-soft: #c8c6bc;
+  --muted: #8e9085;
+  --subtle: #696c62;
+  --accent: #d4b16d;
+  --accent-strong: #e1c487;
+  --accent-ink: #241e12;
+  --accent-wash: rgba(212, 177, 109, 0.1);
+  --green: #92b59a;
+  --green-wash: rgba(114, 160, 125, 0.12);
+  --blue: #90aeca;
+  --blue-wash: rgba(109, 144, 184, 0.12);
+  --violet: #b6a5ca;
+  --violet-wash: rgba(145, 115, 179, 0.14);
+  --red: #d28c7f;
+  --red-wash: rgba(178, 92, 75, 0.13);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.16);
+  --shadow-lg: 0 28px 80px rgba(0, 0, 0, 0.45);
+  --overlay: rgba(9, 10, 8, 0.72);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas: #f2f0e9;
+  --canvas-raised: #f7f5ef;
+  --surface: #fbfaf6;
+  --surface-raised: #fffefa;
+  --surface-hover: #f4f1e8;
+  --sidebar: #eeece4;
+  --line: rgba(39, 39, 31, 0.1);
+  --line-strong: rgba(39, 39, 31, 0.17);
+  --ink: #22231e;
+  --ink-soft: #4e5047;
+  --muted: #76786e;
+  --subtle: #92948a;
+  --accent: #9f7733;
+  --accent-strong: #856125;
+  --accent-ink: #fffdf8;
+  --accent-wash: rgba(159, 119, 51, 0.1);
+  --green: #4f8058;
+  --green-wash: rgba(79, 128, 88, 0.1);
+  --blue: #4d739e;
+  --blue-wash: rgba(77, 115, 158, 0.1);
+  --violet: #795c94;
+  --violet-wash: rgba(121, 92, 148, 0.1);
+  --red: #a14e40;
+  --red-wash: rgba(161, 78, 64, 0.1);
+  --shadow-sm: 0 2px 8px rgba(45, 43, 34, 0.05);
+  --shadow-lg: 0 24px 70px rgba(36, 34, 26, 0.18);
+  --overlay: rgba(27, 27, 22, 0.42);
+}
+
+:root {
+  font-family: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 19px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --motion-fast: 120ms ease;
+  --motion-base: 190ms cubic-bezier(.2,.75,.25,1);
+}

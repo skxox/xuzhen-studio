@@ -1,0 +1,1 @@
+"""Xuzhen Studio application package."""

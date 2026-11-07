@@ -4,6 +4,8 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Field, TextArea } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
+import type { Project } from '../lib/types';
+import { OriginalNovelOutlineWorkspace } from './OriginalNovelOutlineWorkspace';
 
 const scenes = [
   { id: 'S01', time: '清晨 · 内', place: '南汀岛旧气象站 · 记录室', beat: '林澄比对两份潮位记录，发现十一分钟的空白', lines: 4, length: '00:32' },
@@ -11,10 +13,11 @@ const scenes = [
   { id: 'S03', time: '清晨 · 内', place: '灯塔 · 窄梯间', beat: '林澄在气压计背板后找到母亲留下的编号', lines: 3, length: '00:26' },
 ];
 
-export function WritingPage() {
+export function WritingPage({ project }: { project?: Project }) {
   const [tab, setTab] = useState<'outline' | 'script' | 'dialogue'>('script');
   const [selected, setSelected] = useState(0);
   const [toast, setToast] = useState('');
+  if (project?.creation_mode === 'original') return <OriginalNovelOutlineWorkspace project={project}/>;
   return <div className="writing-page">
     <PageHeading eyebrow="STORY DEVELOPMENT" title="让故事变成可拍的场次。" description="大纲、场次、节拍与对白各自版本化。每项改编都保留小说出处或明确标注为新增。" actions={<><Badge tone="green" dot>剧本 v12 · 已确认</Badge><Button variant="primary" icon={<Sparkles size={15}/>} onClick={() => setToast('剧本生成需要已验收的大纲、角色、美术和文本 Provider。当前没有提交模型任务。')}>生成候选</Button></>} />
     <div className="writing-kpis"><WritingKpi label="剧本来源" value="小说章节 18–21" detail="改编分支 AB-03 · 锁定版本 07"/><WritingKpi label="目标时长" value="02:00" detail="估算 01:46 · 误差 ± 12 秒"/><WritingKpi label="来源覆盖" value="84%" detail="新增对白 6 行 · 均已标记"/><WritingKpi label="待处理 finding" value="02" detail="时长预算 · 一处角色动机" alert/></div>

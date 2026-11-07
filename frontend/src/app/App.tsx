@@ -141,7 +141,7 @@ function AppShell() {
       <main className="page-content"><Suspense fallback={<div className="page-loading">正在载入流程观察台…</div>}><Routes>
         <Route path="/" element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />} />
         <Route path="/source" element={<SourcePage key={project?.id ?? 'demo'} project={project} />} />
-        <Route path="/writing" element={<WritingPage />} />
+        <Route path="/writing" element={<WritingPage project={project} />} />
         <Route path="/storyboard" element={<StoryboardPage />} />
         <Route path="/canvas" element={<CanvasPage project={project} />} />
         <Route path="/assets" element={<AssetsPage project={project} />} />

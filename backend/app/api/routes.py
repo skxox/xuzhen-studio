@@ -192,6 +192,45 @@ def stage_dependencies(project: Project, stage_key: str) -> tuple[str, ...]:
     return DEPENDENCIES.get(stage_key, ())
 
 
+def invalidate_downstream_stages(db: Session, project: Project, stage_key: str) -> None:
+    stages = db.scalars(select(StageState).where(StageState.project_id == project.id)).all()
+    affected = {stage_key}
+    changed = True
+    while changed:
+        changed = False
+        for stage in stages:
+            if stage.stage_key not in affected and any(
+                dependency in affected for dependency in stage_dependencies(project, stage.stage_key)
+            ):
+                affected.add(stage.stage_key)
+                changed = True
+    for stage in stages:
+        if stage.stage_key in affected - {stage_key} and stage.status not in {"not_started", "stale"}:
+            previous_status = stage.status
+            stage.status = "stale"
+            stage.stale = True
+            stage.version += 1
+            stage.decision = {}
+            audit(db, project.id, "stage.invalidated", stage.id, {
+                "stage_key": stage.stage_key,
+                "upstream_stage": stage_key,
+                "previous_status": previous_status,
+                "version": stage.version,
+            })
+
+
+def refresh_ready_stages(db: Session, project: Project) -> None:
+    states = db.scalars(select(StageState).where(StageState.project_id == project.id)).all()
+    statuses = {stage.stage_key: stage.status for stage in states}
+    for stage in states:
+        if stage.status != "not_started":
+            continue
+        dependencies = stage_dependencies(project, stage.stage_key)
+        if dependencies and all(statuses.get(key) in {"accepted", "waived"} for key in dependencies):
+            stage.status = "ready"
+            stage.stale = False
+
+
 def safe_project(p: Project):
     return {"id": p.id, "name": p.name, "creation_mode": p.creation_mode, "status": p.status,
             "genre": p.genre, "target_episodes": p.target_episodes, "episode_seconds": p.episode_seconds,
@@ -287,7 +326,7 @@ def get_stages(project_id: str, db: Session = Depends(get_db)):
 
 @router.post("/projects/{project_id}/chapters", status_code=201)
 def add_chapter(project_id: str, data: ChapterCreate, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
+    project = project_or_404(db, project_id)
     content_hash = hashlib.sha256(data.body.encode("utf-8")).hexdigest()
     chapter = Chapter(project_id=project_id, content_hash=content_hash, **data.model_dump())
     db.add(chapter)
@@ -300,6 +339,7 @@ def add_chapter(project_id: str, data: ChapterCreate, db: Session = Depends(get_
     if src:
         src.status = "needs_review"
         src.version += 1
+        invalidate_downstream_stages(db, project, "source")
     audit(db, project_id, "chapter.imported", chapter.id, {"ordinal": chapter.ordinal, "sha256": content_hash})
     db.commit()
     return {"id": chapter.id, "project_id": project_id, "ordinal": chapter.ordinal, "title": chapter.title,
@@ -308,7 +348,7 @@ def add_chapter(project_id: str, data: ChapterCreate, db: Session = Depends(get_
 
 @router.post("/projects/{project_id}/chapters/upload", status_code=201)
 async def upload_text(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
+    project = project_or_404(db, project_id)
     filename = file.filename or "upload.txt"
     if Path(filename).suffix.lower() not in {".txt", ".md"}:
         raise HTTPException(415, "mvp_accepts_txt_md_only")
@@ -339,6 +379,7 @@ async def upload_text(project_id: str, file: UploadFile = File(...), db: Session
     if stage:
         stage.status = "needs_review"
         stage.version += 1
+        invalidate_downstream_stages(db, project, "source")
     audit(db, project_id, "source.uploaded", project_id, {"filename": filename, "chapters": len(created)})
     db.commit()
     return {"filename": filename, "chapters": created, "review_required": True}
@@ -413,6 +454,7 @@ def save_creative_brief(
     stage.version += 1
     stage.stale = False
     stage.decision = {}
+    invalidate_downstream_stages(db, project, "creativeBrief")
     audit(db, project_id, "creative_brief.saved", item.id, {
         "revision": item.revision, "rights_confirmed": item.rights_confirmed,
         "status": item.status,
@@ -457,6 +499,7 @@ def save_commercial_brief(project_id: str, data: CommercialBriefSave, db: Sessio
     stage.version += 1
     stage.stale = False
     stage.decision = {}
+    invalidate_downstream_stages(db, project, "commercialBrief")
     audit(db, project_id, "commercial_brief.saved", item.id, {
         "revision": item.revision, "rights_confirmed": item.rights_confirmed,
         "selling_point_count": len(item.selling_points),
@@ -493,8 +536,12 @@ async def upload_commercial_material(
     if stage and stage.status == "needs_review":
         raise HTTPException(409, "commercial_materials_locked_during_review")
 
-    name = Path(file.filename or "material").name
+    name = Path((file.filename or "material").replace("\\", "/")).name
+    if not name or len(name) > 300 or any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise HTTPException(422, "invalid_filename")
     suffix = Path(name).suffix.lower()
+    if not suffix or len(suffix) > 8:
+        raise HTTPException(415, "unsupported_material_type")
     content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "upload_too_large")
@@ -549,6 +596,7 @@ async def upload_commercial_material(
         stage.version += 1
         stage.stale = False
         stage.decision = {}
+        invalidate_downstream_stages(db, project, "commercialBrief")
     audit(db, project_id, "commercial_material.uploaded", item.id, {
         "media_kind": kind, "size_bytes": len(content), "sha256": item.sha256,
         "rights_status": rights_status,
@@ -631,6 +679,8 @@ def decide_stage(project_id: str, stage_key: str, data: GateDecision, db: Sessio
         brief = db.scalar(select(CommercialBrief).where(CommercialBrief.project_id == project_id))
         if brief:
             brief.status = "accepted" if data.action == "accept" else "draft"
+    if data.action in {"accept", "waive"}:
+        refresh_ready_stages(db, project)
     audit(db, project_id, "stage.decision", stage.id, stage.decision)
     db.commit()
     return {"id": stage.id, "stage_key": stage_key, "status": stage.status, "version": stage.version, "decision": stage.decision}
@@ -644,7 +694,8 @@ def start_stage(project_id: str, stage_key: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "stage_not_found")
     if stage.status not in {"ready", "accepted", "waived", "stale", "failed"}:
         raise HTTPException(409, f"stage_cannot_start_from:{stage.status}")
-    deps = stage_dependencies(project_or_404(db, project_id), stage_key)
+    project = project_or_404(db, project_id)
+    deps = stage_dependencies(project, stage_key)
     dep_states = {s.stage_key: s.status for s in db.scalars(select(StageState).where(
         StageState.project_id == project_id, StageState.stage_key.in_(deps)
     )).all()}
@@ -654,6 +705,7 @@ def start_stage(project_id: str, stage_key: str, db: Session = Depends(get_db)):
     stage.status = "running"
     stage.version += 1
     stage.stale = False
+    invalidate_downstream_stages(db, project, stage_key)
     audit(db, project_id, "stage.started", stage.id, {"stage_key": stage_key, "version": stage.version})
     db.commit()
     return {"id": stage.id, "stage_key": stage_key, "status": stage.status, "version": stage.version}

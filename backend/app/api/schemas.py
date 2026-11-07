@@ -24,6 +24,20 @@ class ChapterCreate(BaseModel):
     source_name: str | None = None
 
 
+class ChapterRevision(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    body: str = Field(min_length=1, max_length=2_000_000)
+
+    @field_validator("title", "body", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ChapterRestore(BaseModel):
+    version: int = Field(ge=1)
+
+
 class CharacterReferenceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     immutable_features: str = Field(min_length=1, max_length=2000)

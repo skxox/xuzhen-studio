@@ -35,6 +35,8 @@ from ..infrastructure.database import SessionLocal
 from .schemas import (
     CharacterReferenceCreate,
     ChapterCreate,
+    ChapterRestore,
+    ChapterRevision,
     CommercialBriefSave,
     CreativeBriefSave,
     GateDecision,
@@ -354,7 +356,11 @@ def get_stages(project_id: str, db: Session = Depends(get_db)):
 def add_chapter(project_id: str, data: ChapterCreate, db: Session = Depends(get_db)):
     project = project_or_404(db, project_id)
     content_hash = hashlib.sha256(data.body.encode("utf-8")).hexdigest()
-    chapter = Chapter(project_id=project_id, content_hash=content_hash, **data.model_dump())
+    previous_versions = db.scalars(select(Chapter.version).where(
+        Chapter.project_id == project_id, Chapter.ordinal == data.ordinal
+    )).all()
+    chapter = Chapter(project_id=project_id, content_hash=content_hash,
+                      version=max(previous_versions, default=0) + 1, **data.model_dump())
     db.add(chapter)
     try:
         db.flush()
@@ -414,9 +420,112 @@ async def upload_text(project_id: str, file: UploadFile = File(...), db: Session
 @router.get("/projects/{project_id}/chapters")
 def list_chapters(project_id: str, db: Session = Depends(get_db)):
     project_or_404(db, project_id)
-    items = db.scalars(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.ordinal)).all()
+    items = db.scalars(select(Chapter).where(Chapter.project_id == project_id)
+                       .order_by(Chapter.ordinal, Chapter.version.desc())).all()
+    latest: dict[int, Chapter] = {}
+    for item in items:
+        latest.setdefault(item.ordinal, item)
+    items = sorted(latest.values(), key=lambda item: item.ordinal)
     return [{"id": c.id, "ordinal": c.ordinal, "title": c.title, "body": c.body,
              "content_hash": c.content_hash, "version": c.version, "source_name": c.source_name} for c in items]
+
+
+@router.put("/projects/{project_id}/chapters/{chapter_id}")
+def revise_chapter(project_id: str, chapter_id: str, data: ChapterRevision, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    current = db.scalar(select(Chapter).where(
+        Chapter.id == chapter_id, Chapter.project_id == project_id
+    ))
+    if not current:
+        raise HTTPException(404, "chapter_not_found")
+    latest_version = max(db.scalars(select(Chapter.version).where(
+        Chapter.project_id == project_id, Chapter.ordinal == current.ordinal
+    )).all(), default=0)
+    if current.version != latest_version:
+        raise HTTPException(409, "chapter_revision_is_not_latest")
+    content_hash = hashlib.sha256(data.body.encode("utf-8")).hexdigest()
+    revision = Chapter(
+        project_id=project_id, ordinal=current.ordinal, title=data.title, body=data.body,
+        content_hash=content_hash, version=current.version + 1, source_name=current.source_name,
+    )
+    db.add(revision)
+    db.flush()
+    source = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "source"
+    ))
+    if source:
+        source.status = "needs_review"
+        source.version += 1
+        source.stale = False
+        source.decision = {}
+        invalidate_downstream_stages(db, project, "source")
+    audit(db, project_id, "chapter.revised", revision.id, {
+        "ordinal": revision.ordinal, "previous_version": current.version,
+        "version": revision.version, "sha256": content_hash,
+    })
+    db.commit()
+    return {"id": revision.id, "project_id": project_id, "ordinal": revision.ordinal,
+            "title": revision.title, "content_hash": revision.content_hash,
+            "char_count": len(revision.body), "version": revision.version}
+
+
+@router.get("/projects/{project_id}/chapters/{chapter_id}/versions")
+def list_chapter_versions(project_id: str, chapter_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    chapter = db.scalar(select(Chapter).where(
+        Chapter.id == chapter_id, Chapter.project_id == project_id
+    ))
+    if not chapter:
+        raise HTTPException(404, "chapter_not_found")
+    versions = db.scalars(select(Chapter).where(
+        Chapter.project_id == project_id, Chapter.ordinal == chapter.ordinal
+    ).order_by(Chapter.version.desc())).all()
+    return [{"id": item.id, "ordinal": item.ordinal, "title": item.title, "body": item.body,
+             "content_hash": item.content_hash, "version": item.version,
+             "created_at": item.created_at} for item in versions]
+
+
+@router.post("/projects/{project_id}/chapters/{chapter_id}/restore")
+def restore_chapter_version(project_id: str, chapter_id: str, data: ChapterRestore,
+                            db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    current = db.scalar(select(Chapter).where(
+        Chapter.id == chapter_id, Chapter.project_id == project_id
+    ))
+    if not current:
+        raise HTTPException(404, "chapter_not_found")
+    versions = db.scalars(select(Chapter).where(
+        Chapter.project_id == project_id, Chapter.ordinal == current.ordinal
+    ).order_by(Chapter.version.desc())).all()
+    latest = versions[0] if versions else None
+    target = next((item for item in versions if item.version == data.version), None)
+    if not target:
+        raise HTTPException(404, "chapter_version_not_found")
+    if not latest or current.version != latest.version:
+        raise HTTPException(409, "chapter_revision_is_not_latest")
+    revision = Chapter(
+        project_id=project_id, ordinal=current.ordinal, title=target.title, body=target.body,
+        content_hash=target.content_hash, version=latest.version + 1, source_name=target.source_name,
+    )
+    db.add(revision)
+    db.flush()
+    source = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "source"
+    ))
+    if source:
+        source.status = "needs_review"
+        source.version += 1
+        source.stale = False
+        source.decision = {}
+        invalidate_downstream_stages(db, project, "source")
+    audit(db, project_id, "chapter.version_restored", revision.id, {
+        "ordinal": revision.ordinal, "restored_from": target.version,
+        "version": revision.version, "sha256": revision.content_hash,
+    })
+    db.commit()
+    return {"id": revision.id, "project_id": project_id, "ordinal": revision.ordinal,
+            "title": revision.title, "content_hash": revision.content_hash,
+            "char_count": len(revision.body), "version": revision.version}
 
 
 @router.get("/projects/{project_id}/character-references")

@@ -22,6 +22,12 @@ export const api = {
   updateProjectRights: (projectId: string, rights_status: Project['rights_status']) =>
     request<Project>(`/projects/${projectId}/rights`, { method: 'PATCH', body: JSON.stringify({ rights_status }) }),
   chapters: (projectId: string) => request<Chapter[]>(`/projects/${projectId}/chapters`),
+  reviseChapter: (projectId: string, chapterId: string, body: Pick<Chapter, 'title' | 'body'>) =>
+    request<Pick<Chapter, 'id' | 'ordinal' | 'title' | 'content_hash' | 'version'>>(`/projects/${projectId}/chapters/${chapterId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  chapterVersions: (projectId: string, chapterId: string) =>
+    request<Chapter[]>(`/projects/${projectId}/chapters/${chapterId}/versions`),
+  restoreChapterVersion: (projectId: string, chapterId: string, version: number) =>
+    request<Pick<Chapter, 'id' | 'ordinal' | 'title' | 'content_hash' | 'version'>>(`/projects/${projectId}/chapters/${chapterId}/restore`, { method: 'POST', body: JSON.stringify({ version }) }),
   characterReferences: (projectId: string) => request<CharacterReference[]>(`/projects/${projectId}/character-references`),
   createCharacterReference: (projectId: string, body: CharacterReferenceCreateInput) =>
     request<CharacterReference>(`/projects/${projectId}/character-references`, { method: 'POST', body: JSON.stringify(body) }),

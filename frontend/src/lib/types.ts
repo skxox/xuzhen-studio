@@ -10,7 +10,7 @@ export interface Project {
   target_episodes?: number | null;
   episode_seconds?: number | null;
   aspect_ratio: string;
-  rights_status: string;
+  rights_status: 'unconfirmed' | 'owned' | 'licensed' | 'public_domain' | 'restricted';
   created_at: string;
   updated_at: string;
 }

@@ -19,6 +19,8 @@ export const api = {
   projects: () => request<Project[]>('/projects'),
   createProject: (body: ProjectCreateInput) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(body) }),
+  updateProjectRights: (projectId: string, rights_status: Project['rights_status']) =>
+    request<Project>(`/projects/${projectId}/rights`, { method: 'PATCH', body: JSON.stringify({ rights_status }) }),
   chapters: (projectId: string) => request<Chapter[]>(`/projects/${projectId}/chapters`),
   characterReferences: (projectId: string) => request<CharacterReference[]>(`/projects/${projectId}/character-references`),
   createCharacterReference: (projectId: string, body: CharacterReferenceCreateInput) =>

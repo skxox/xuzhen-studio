@@ -1,20 +1,28 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Check, ChevronRight, FileText, FolderInput, LockKeyhole, Plus, ShieldCheck, Sparkles, UploadCloud } from 'lucide-react';
-import type { CommercialBriefSaveInput, CommercialMaterial, CreativeBriefSaveInput, Project } from '../lib/types';
+import type { Chapter, CommercialBriefSaveInput, CommercialMaterial, CreativeBriefSaveInput, Project } from '../lib/types';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Field, SelectInput, TextArea, TextInput } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
+import { Dialog } from '../components/ui/Dialog';
 
 export function SourcePage({ project }: { project?: Project }) {
   const [entry, setEntry] = useState<'source' | 'brief'>(project?.creation_mode === 'original' ? 'brief' : 'source');
   const [toast, setToast] = useState('');
+  const [rightsDraft, setRightsDraft] = useState<Project['rights_status']>(project?.rights_status ?? 'unconfirmed');
+  const [selectedChapter, setSelectedChapter] = useState<Chapter>();
+  const [returnReason, setReturnReason] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const chapters = useQuery({ queryKey: ['chapters', project?.id], queryFn: () => api.chapters(project!.id), enabled: Boolean(project?.id) });
-  const upload = useMutation({ mutationFn: (file: File) => api.uploadChapters(project!.id, file), onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ['chapters', project?.id] }); setToast(`已解析 ${result.chapters.length} 个章节。导入内容仍待你确认章节顺序和权利状态。`); } });
+  const stages = useQuery({ queryKey: ['stages', project?.id], queryFn: () => api.stages(project!.id), enabled: Boolean(project?.id) });
+  const sourceStage = stages.data?.find((item) => item.stage_key === 'source');
+  const upload = useMutation({ mutationFn: (file: File) => api.uploadChapters(project!.id, file), onSuccess: async (result) => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['chapters', project?.id] }), queryClient.invalidateQueries({ queryKey: ['stages', project?.id] })]); setToast(`已解析 ${result.chapters.length} 个章节。请抽查原文并确认权利状态后验收。`); } });
+  const saveRights = useMutation({ mutationFn: () => api.updateProjectRights(project!.id, rightsDraft), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }); setToast('项目权利状态已保存。'); } });
+  const decideSource = useMutation({ mutationFn: (action: 'accept' | 'reject') => api.decideStage(project!.id, 'source', action, action === 'reject' ? returnReason.trim() : undefined), onSuccess: async (result) => { setReturnReason(''); await queryClient.invalidateQueries({ queryKey: ['stages', project?.id] }); setToast(result.status === 'accepted' ? '原文来源已验收；视频改编大纲阶段已解锁。' : '原文已退回；重新导入修订内容后可再次审阅。'); } });
   const original = project?.creation_mode === 'original';
   if (project?.creation_mode === 'commercial') return <CommercialBriefWorkspace project={project} />;
   return <div className="source-page">
@@ -30,13 +38,16 @@ export function SourcePage({ project }: { project?: Project }) {
         {upload.isError && <p role="alert" className="form-error">导入失败：{upload.error.message}</p>}
         <div className="import-rules"><div><Check size={14}/>自动识别章节标题</div><div><Check size={14}/>记录文件名与内容哈希</div><div><Check size={14}/>进入原文审阅门禁</div></div>
       </Panel>
-      <Panel className="rights-panel"><div className="panel-heading"><div><div className="eyebrow">RIGHTS & DATA USE</div><h3>权利与模型使用范围</h3><p>上传文件前，先确认作品权利。把原文发给云模型还需要单独授权。</p></div><LockKeyhole size={18}/></div>
-        <div className="rights-callout"><ShieldCheck size={19}/><span><b>当前项目权利：{project?.rights_status === 'unconfirmed' ? '待确认' : project?.rights_status}</b><small>原文阶段验收前必须记录权利状态；权利待核实的作品不得进入正式发布交付。</small></span></div>
+      <Panel className="rights-panel"><div className="panel-heading"><div><div className="eyebrow">RIGHTS & DATA USE</div><h3>权利与模型使用范围</h3><p>记录原作使用依据；云端模型处理仍需单独授权。</p></div><LockKeyhole size={18}/></div>
+        <div className="rights-callout"><ShieldCheck size={19}/><span><b>当前项目权利：{rightsLabel(project?.rights_status)}</b><small>原文阶段验收前必须记录权利状态；限制使用的作品只能在授权范围内推进。</small></span></div>
+        <Field label="原作权利状态"><SelectInput value={rightsDraft} disabled={sourceStage?.status === 'needs_review'} onChange={(event) => setRightsDraft(event.target.value as Project['rights_status'])}><option value="unconfirmed">待确认</option><option value="owned">自有版权</option><option value="licensed">已获授权</option><option value="public_domain">公版作品</option><option value="restricted">仅限内部评估</option></SelectInput></Field>
+        <Button disabled={!project || saveRights.isPending || rightsDraft === project?.rights_status || sourceStage?.status === 'needs_review'} onClick={() => saveRights.mutate()}>{saveRights.isPending ? '正在保存…' : '保存权利状态'}</Button>
+        {saveRights.isError && <p className="form-error" role="alert">权利状态保存失败：{saveRights.error.message}</p>}
         <div className="rights-list"><div><span>原文进入模型服务</span><Badge tone="gold">默认不授权</Badge></div><div><span>按服务逐个选择文本 / 图片 / 视频</span><Badge>需单独设置</Badge></div><div><span>生成任务保存授权和服务快照</span><Badge>后端待接入</Badge></div></div>
-        <Button onClick={() => setToast('权利状态可在创建项目时记录；项目编辑 API 尚待加入。')}>查看项目权利设置 <ChevronRight size={14}/></Button>
       </Panel>
       <Panel className="chapter-panel"><div className="panel-heading"><div><div className="eyebrow">CHAPTER MAP</div><h3>章节结构 <span className="heading-muted">{chapters.data?.length ?? 0} 章</span></h3><p>检查章节顺序、重复内容与分批导入结果。</p></div><button className="plain-icon" aria-label="添加章节" onClick={() => input.current?.click()}><Plus size={17}/></button></div>
-        {chapters.isLoading ? <div className="chapter-empty">正在读取章节…</div> : chapters.data?.length ? <div className="chapter-list">{chapters.data.map((chapter) => <div className="chapter-row" key={chapter.id}><span className="chapter-index">{String(chapter.ordinal).padStart(2, '0')}</span><FileText size={16}/><div><b>{chapter.title}</b><small>{chapter.body.length.toLocaleString()} 字 · v{chapter.version} · {chapter.source_name || '粘贴导入'}</small></div><Badge tone="gold">待确认</Badge><button className="text-link">查看</button></div>)}</div> : <div className="chapter-empty"><span><BookOpen size={19}/></span><b>还没有导入章节</b><small>导入作品后，章节解析结果会出现在这里。</small></div>}
+        {chapters.isLoading ? <div className="chapter-empty">正在读取章节…</div> : chapters.data?.length ? <div className="chapter-list">{chapters.data.map((chapter) => <div className="chapter-row" key={chapter.id}><span className="chapter-index">{String(chapter.ordinal).padStart(2, '0')}</span><FileText size={16}/><div><b>{chapter.title}</b><small>{chapter.body.length.toLocaleString()} 字 · v{chapter.version} · {chapter.source_name || '粘贴导入'}</small></div><Badge tone={sourceStage?.status === 'accepted' ? 'green' : 'gold'}>{sourceStage?.status === 'accepted' ? '已验收' : '待审阅'}</Badge><button className="text-link" onClick={() => setSelectedChapter(chapter)}>查看</button></div>)}</div> : <div className="chapter-empty"><span><BookOpen size={19}/></span><b>还没有导入章节</b><small>导入作品后，章节解析结果会出现在这里。</small></div>}
+        {sourceStage?.status === 'needs_review' && <div className="source-review-box"><div><b>原文来源等待审核</b><small>逐章抽查导入结果，确认权利状态已记录，再验收并解锁改编大纲。</small></div><Field label="退回原因"><TextInput value={returnReason} onChange={(event) => setReturnReason(event.target.value)} maxLength={1000} placeholder="例如：章节缺失，需重新导入" /></Field><div className="brief-actions"><Button variant="danger" disabled={!returnReason.trim() || decideSource.isPending} onClick={() => decideSource.mutate('reject')}>退回修订</Button><Button variant="primary" disabled={!chapters.data?.length || project?.rights_status === 'unconfirmed' || decideSource.isPending} title={project?.rights_status === 'unconfirmed' ? '请先保存原作权利状态' : undefined} onClick={() => decideSource.mutate('accept')}>验收原文并解锁下一阶段</Button></div>{decideSource.isError && <p className="form-error" role="alert">审核操作失败：{decideSource.error.message}</p>}</div>}
         {toast && <div className="inline-success" role="status"><Check size={14}/>{toast}<button onClick={() => setToast('')} aria-label="关闭">×</button></div>}
       </Panel>
       <Panel className="source-analysis-panel"><div className="panel-heading"><div><div className="eyebrow">ANALYSIS QUEUE</div><h3>AI 原文分析</h3><p>抽取结果先形成带出处候选，不会直接进入已确认设定。</p></div><Badge tone="neutral">等待原文确认</Badge></div>
@@ -44,7 +55,14 @@ export function SourcePage({ project }: { project?: Project }) {
         <Button variant="primary" disabled={!project || !chapters.data?.length} icon={<Sparkles size={15}/>} onClick={() => setToast('文本 Provider Adapter 尚未接入，因此不会发起真实模型调用。')}>分析原文 <ChevronRight size={14}/></Button>
       </Panel>
     </div> : <BriefWorkspace project={project} onSave={setToast} onGenerate={() => setToast('故事圣经生成尚未启用：请先配置文本服务，接入真实 Provider 后才会创建生成任务。')}/ >}
+    <Dialog open={Boolean(selectedChapter)} onClose={() => setSelectedChapter(undefined)} title={selectedChapter?.title ?? '章节原文'} description={selectedChapter ? `第 ${selectedChapter.ordinal} 章 · v${selectedChapter.version} · ${selectedChapter.body.length.toLocaleString()} 字 · SHA-256 ${selectedChapter.content_hash.slice(0, 16)}…` : undefined}>
+      {selectedChapter && <pre className="chapter-preview">{selectedChapter.body}</pre>}
+    </Dialog>
   </div>;
+}
+
+function rightsLabel(status?: Project['rights_status']): string {
+  return ({ unconfirmed: '待确认', owned: '自有版权', licensed: '已获授权', public_domain: '公版作品', restricted: '仅限内部评估' } as const)[status ?? 'unconfirmed'];
 }
 
 function CommercialBriefWorkspace({ project }: { project: Project }) {

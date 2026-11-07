@@ -13,6 +13,10 @@ class ProjectCreate(BaseModel):
     rights_status: Literal["unconfirmed", "owned", "licensed", "public_domain", "restricted"] = "unconfirmed"
 
 
+class ProjectRightsUpdate(BaseModel):
+    rights_status: Literal["unconfirmed", "owned", "licensed", "public_domain", "restricted"]
+
+
 class ChapterCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     body: str = Field(min_length=1)

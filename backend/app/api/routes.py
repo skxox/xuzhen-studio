@@ -40,6 +40,7 @@ from .schemas import (
     GateDecision,
     JobCreate,
     ProjectCreate,
+    ProjectRightsUpdate,
     ServiceProfileCreate,
 )
 
@@ -304,6 +305,31 @@ def list_projects(db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}")
 def get_project(project_id: str, db: Session = Depends(get_db)):
     return safe_project(project_or_404(db, project_id))
+
+
+@router.patch("/projects/{project_id}/rights")
+def update_project_rights(project_id: str, data: ProjectRightsUpdate, db: Session = Depends(get_db)):
+    project = project_or_404(db, project_id)
+    if project.creation_mode != "adaptation":
+        raise HTTPException(409, "project_rights_update_only_available_for_adaptation")
+    stage = db.scalar(select(StageState).where(
+        StageState.project_id == project_id, StageState.stage_key == "source"
+    ))
+    if stage and stage.status == "needs_review":
+        raise HTTPException(409, "source_locked_during_review")
+    previous = project.rights_status
+    project.rights_status = data.rights_status
+    if stage and previous != project.rights_status and stage.status in {"accepted", "waived", "stale", "blocked"}:
+        stage.status = "needs_review"
+        stage.version += 1
+        stage.stale = False
+        stage.decision = {}
+        invalidate_downstream_stages(db, project, "source")
+    audit(db, project_id, "project.rights_updated", project_id, {
+        "previous": previous, "current": project.rights_status,
+    })
+    db.commit()
+    return safe_project(project)
 
 
 @router.get("/projects/{project_id}/stages")

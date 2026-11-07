@@ -92,7 +92,7 @@ class ServiceProfileCreate(BaseModel):
     transport: Literal["remote_api", "self_hosted_api", "local_runtime"]
     endpoint: HttpUrl
     model_id: str
-    secret_ref: str | None = None
+    secret_ref: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
     capabilities: dict = Field(default_factory=dict)
 
 

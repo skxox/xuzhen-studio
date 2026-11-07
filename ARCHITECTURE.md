@@ -45,7 +45,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 ## 数据与安全
 
 - 原文和用户媒体使用对象存储；数据库只存元数据、版本、哈希与受控 URI。
-- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。密钥库/加密主密钥尚未接入，因此当前 API 只允许 `secret_ref` 元数据，不接受也不执行明文密钥。
+- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。当前通过后端 `XZ_PROVIDER_SECRETS` 环境配置解析 `secret_ref`；尚未接入独立密钥库/加密主密钥。连通检查只支持本机访问的 OpenAI 兼容文本服务 `/models`，并默认阻止非公网 IP 目标；成功不代表生成执行器可用。身份认证上线前，不允许远端客户端触发带密钥的连通检查。
 - 上传按扩展名、大小、内容 MIME、哈希校验；生产版还要做恶意文件扫描、压缩炸弹限制与安全下载。
 - 远程 URL 仅 HTTPS；本地 HTTP 仅允许 loopback。生产部署还需配置域名白名单和 DNS/IP 防 SSRF。
 - 项目权利状态及按模态外发授权在提交任务前必须由服务端 Preflight 检查。当前代码已经要求改编原文门禁记录权利状态，但 Provider 授权、身份认证与多用户权限尚未实现。
@@ -58,7 +58,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 - `POST/GET /projects/{id}/chapters`、`POST /projects/{id}/chapters/upload`（TXT/MD）
 - `GET/PUT /projects/{id}/creative-brief`（仅原创项目；保存简报修订与权利确认声明，并进入作者确认门禁）
 - `GET/POST /projects/{id}/character-references`（角色锚点、服装规则与固定四视图清单；仅保存草稿，不生成图片）
-- `POST/GET /projects/{id}/service-profiles`
+- `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（目前仅 OpenAI 兼容文本服务连通检查）
 - `POST/GET /projects/{id}/jobs`
 - Swagger UI：`/docs`
 

@@ -135,13 +135,16 @@ export interface GenerationJobSummary {
 
 export interface ServiceProfile {
   id: string;
-  modality: string;
+  modality: 'text' | 'image' | 'video' | 'audio';
   name: string;
   adapter_id: string;
   transport: string;
   endpoint: string;
   model_id: string;
   secret_ref?: string | null;
+  secret_configured?: boolean;
+  connection_test?: { status: 'connected' | 'failed'; model_available: boolean; checked_at: string; error_code?: string } | null;
+  capabilities?: Record<string, unknown>;
   enabled: boolean;
   version: number;
 }

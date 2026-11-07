@@ -1,10 +1,18 @@
 import hashlib
+import http.client
+import ipaddress
+import json
+import os
 import re
+import socket
+import ssl
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -78,6 +86,83 @@ ALLOWED = {
 
 
 router = APIRouter()
+
+
+class PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, port: int, target_ip: str, **kwargs):
+        super().__init__(host, port, **kwargs)
+        self.target_ip = target_ip
+
+    def connect(self):
+        self.sock = socket.create_connection((self.target_ip, self.port), self.timeout, self.source_address)
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, target_ip: str, **kwargs):
+        super().__init__(host, port, **kwargs)
+        self.target_ip = target_ip
+
+    def connect(self):
+        sock = socket.create_connection((self.target_ip, self.port), self.timeout, self.source_address)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def resolve_provider_secret(secret_ref: str | None) -> str | None:
+    if not secret_ref:
+        return None
+    env_key = f"XZ_PROVIDER_SECRET_{re.sub(r'[^A-Z0-9_]', '_', secret_ref.upper())}"
+    value = os.environ.get(env_key)
+    if value:
+        return value
+    return next((secret for key, secret in settings.provider_secrets.items() if key.casefold() == secret_ref.casefold()), None)
+
+
+def validate_provider_target(endpoint: str, transport: str) -> list[str]:
+    parsed = urlsplit(endpoint)
+    hostname = parsed.hostname
+    if not hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise HTTPException(422, "provider_endpoint_invalid")
+    if parsed.scheme not in {"https", "http"}:
+        raise HTTPException(422, "provider_endpoint_scheme_invalid")
+    local_transport = transport in {"self_hosted_api", "local_runtime"}
+    if parsed.scheme == "http" and not (local_transport and hostname in {"localhost", "127.0.0.1"}):
+        raise HTTPException(422, "provider_endpoint_requires_https_or_loopback")
+    try:
+        try:
+            addresses = {ipaddress.ip_address(hostname)}
+        except ValueError:
+            addresses = {
+                ipaddress.ip_address(item[4][0].split("%", 1)[0])
+                for item in socket.getaddrinfo(
+                    hostname,
+                    parsed.port or (443 if parsed.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            }
+    except (OSError, ValueError):
+        raise HTTPException(422, "provider_endpoint_dns_resolution_failed")
+    if any(address.is_loopback for address in addresses) and not local_transport:
+        raise HTTPException(422, "loopback_provider_requires_local_transport")
+    allow_private = settings.allow_private_provider_endpoints and local_transport
+    disallowed = any(
+        not address.is_global and not (address.is_loopback and local_transport) and not allow_private
+        for address in addresses
+    )
+    if not addresses or disallowed:
+        raise HTTPException(422, "private_provider_endpoint_blocked")
+    return [str(address) for address in addresses]
+
+
+def persist_connection_test(db: Session, project_id: str, profile: ServiceProfile, result: dict) -> None:
+    capabilities = dict(profile.capabilities or {})
+    capabilities["connection_test"] = result
+    profile.capabilities = capabilities
+    profile.enabled = result["status"] == "connected"
+    profile.version += 1
+    audit(db, project_id, "service_profile.connection_tested", profile.id, {
+        "status": result["status"], "adapter_id": profile.adapter_id, "modality": profile.modality,
+    })
+    db.commit()
 
 
 def get_db():
@@ -620,7 +705,8 @@ def create_profile(project_id: str, data: ServiceProfileCreate, db: Session = De
     db.commit()
     return {"id": p.id, "modality": p.modality, "name": p.name, "adapter_id": p.adapter_id,
             "transport": p.transport, "endpoint": p.endpoint, "model_id": p.model_id,
-            "secret_ref": p.secret_ref, "enabled": p.enabled, "version": p.version}
+            "secret_ref": p.secret_ref, "secret_configured": resolve_provider_secret(p.secret_ref) is not None,
+            "enabled": p.enabled, "version": p.version}
 
 
 @router.get("/projects/{project_id}/service-profiles")
@@ -630,7 +716,90 @@ def list_profiles(project_id: str, db: Session = Depends(get_db)):
     return [{"id": p.id, "modality": p.modality, "name": p.name, "adapter_id": p.adapter_id,
              "transport": p.transport, "endpoint": p.endpoint, "model_id": p.model_id,
              "secret_ref": p.secret_ref, "capabilities": p.capabilities, "enabled": p.enabled,
+             "secret_configured": resolve_provider_secret(p.secret_ref) is not None,
+             "connection_test": (p.capabilities or {}).get("connection_test"),
              "version": p.version} for p in rows]
+
+
+@router.post("/projects/{project_id}/service-profiles/{profile_id}/test")
+def test_service_profile(project_id: str, profile_id: str, request: Request, db: Session = Depends(get_db)):
+    client_host = request.client.host if request.client else ""
+    try:
+        is_loopback_client = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        is_loopback_client = False
+    if not is_loopback_client:
+        raise HTTPException(403, "provider_connection_test_local_only_until_authentication_is_enabled")
+    project_or_404(db, project_id)
+    profile = db.get(ServiceProfile, profile_id)
+    if not profile or profile.project_id != project_id:
+        raise HTTPException(404, "service_profile_not_found")
+    if profile.modality != "text" or profile.adapter_id != "openai-compatible-chat":
+        raise HTTPException(409, "connection_test_not_supported_for_adapter")
+
+    tested_at = datetime.now(timezone.utc).isoformat()
+    try:
+        secret = resolve_provider_secret(profile.secret_ref)
+        if profile.secret_ref and not secret:
+            raise HTTPException(409, "provider_secret_reference_not_configured")
+        parsed = urlsplit(profile.endpoint)
+        base = profile.endpoint.rstrip("/")
+        model_url = base if parsed.path.rstrip("/").endswith("/models") else f"{base}/models" if parsed.path.rstrip("/").endswith("/v1") else f"{base}/v1/models"
+        model_parsed = urlsplit(model_url)
+        target_ips = validate_provider_target(model_url, profile.transport)
+        request_path = model_parsed.path or "/"
+        if model_parsed.query:
+            request_path = f"{request_path}?{model_parsed.query}"
+        port = model_parsed.port or (443 if model_parsed.scheme == "https" else 80)
+        headers = {"Accept": "application/json", "User-Agent": "XuzhenStudio-ProviderCheck/1.0", "Host": model_parsed.netloc}
+        if secret:
+            headers["Authorization"] = f"Bearer {secret}"
+        connection_class = PinnedHTTPSConnection if model_parsed.scheme == "https" else PinnedHTTPConnection
+        connection_kwargs = {"timeout": 10}
+        if model_parsed.scheme == "https":
+            connection_kwargs["context"] = ssl.create_default_context()
+        connection = connection_class(model_parsed.hostname, port, target_ips[0], **connection_kwargs)
+        try:
+            connection.request("GET", request_path, headers=headers)
+            response = connection.getresponse()
+            status_code = response.status
+            raw = response.read(1_000_001)
+        finally:
+            connection.close()
+        if len(raw) > 1_000_000:
+            raise HTTPException(502, "provider_models_response_too_large")
+        if status_code != 200:
+            code = "provider_authentication_failed" if status_code in {401, 403} else "provider_rate_limited" if status_code == 429 else "provider_endpoint_rejected"
+            raise HTTPException(502, code)
+        payload = json.loads(raw)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise HTTPException(502, "provider_models_response_invalid")
+        model_ids = {
+            entry["id"] for entry in payload["data"]
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        }
+        if profile.model_id not in model_ids:
+            raise HTTPException(422, "provider_model_not_found")
+        result = {"status": "connected", "model_available": True, "checked_at": tested_at}
+        persist_connection_test(db, project_id, profile, result)
+        return {**result, "profile_id": profile.id, "execution_ready": False,
+                "message": "服务端已验证连接与模型 ID；实际生成执行器尚未启用。"}
+    except OSError as error:
+        code = "provider_connection_timeout" if isinstance(error, TimeoutError) else "provider_connection_failed"
+    except TimeoutError:
+        code = "provider_connection_timeout"
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        code = "provider_models_response_invalid"
+    except HTTPException as error:
+        code = str(error.detail)
+        status_code = error.status_code
+        result = {"status": "failed", "model_available": False, "checked_at": tested_at, "error_code": code}
+        persist_connection_test(db, project_id, profile, result)
+        raise
+    status_code = 502
+    result = {"status": "failed", "model_available": False, "checked_at": tested_at, "error_code": code}
+    persist_connection_test(db, project_id, profile, result)
+    raise HTTPException(status_code, code)
 
 
 @router.post("/projects/{project_id}/jobs", status_code=202)

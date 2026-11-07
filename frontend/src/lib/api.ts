@@ -52,4 +52,6 @@ export const api = {
   serviceProfiles: (projectId: string) => request<ServiceProfile[]>(`/projects/${projectId}/service-profiles`),
   createServiceProfile: (projectId: string, body: Omit<ServiceProfile, 'id' | 'enabled' | 'version'> & { capabilities?: Record<string, unknown> }) =>
     request<ServiceProfile>(`/projects/${projectId}/service-profiles`, { method: 'POST', body: JSON.stringify(body) }),
+  testServiceProfile: (projectId: string, profileId: string) =>
+    request<{ status: 'connected'; model_available: true; checked_at: string; execution_ready: false; message: string }>(`/projects/${projectId}/service-profiles/${profileId}/test`, { method: 'POST' }),
 };

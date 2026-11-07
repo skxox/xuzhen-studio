@@ -395,6 +395,21 @@
 .scene-row.is-selected { background: var(--accent-wash); }
 .asset-visual { border-radius: 0; }
 .asset-summary { border-radius: 5px; }
+
+/* Character reference draft workflow */
+.character-reference-form { display: grid; gap: 14px; }
+.character-reference-form .text-input { width: 100%; }
+.reference-view-set { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px 14px; padding: 12px; margin: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.reference-view-set legend { padding: 0 5px; color: var(--ink-soft); font-size: 11px; font-weight: 600; }
+.reference-view-set label { display: flex; align-items: center; gap: 7px; color: var(--ink-soft); font-size: 11px; }
+.reference-view-set input { accent-color: var(--accent); }
+.reference-view-set small { grid-column: 1/-1; color: var(--muted); font-size: 10px; }
+.reference-provider-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid var(--line); background: var(--surface-hover); color: var(--accent); }
+.reference-provider-note span { display: grid; gap: 3px; }
+.reference-provider-note b { color: var(--ink-soft); font-size: 11px; }
+.reference-provider-note small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.asset-empty { display: grid; justify-items: center; gap: 8px; padding: 38px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+.asset-empty b { color: var(--ink); font-size: 13px; }
 .source-tabs button.is-active { color: var(--accent); }
 
 @media (max-width: 1080px) {

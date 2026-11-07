@@ -38,33 +38,32 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 
 ## 任务生命周期
 
-`draft → validating → queued → submitting → submitted → running → collecting → needs_review`
+目标任务生命周期为 `draft → validating → queued → submitting → submitted → running → collecting → needs_review`。
 
-终态为 `accepted / rejected / failed / cancelled`。每次重试新增 Attempt；幂等键用于处理网络超时和重复提交。Worker 写状态事件/outbox；SSE 使用事件 ID 支持断线续传。取消结果需尊重 Provider 能力，不能把“本地不再轮询”报告成远端任务已取消。
+当前已落地的文本纵切片在 API 请求内同步调用 Provider，任务状态为 `running → succeeded/failed/stale`，输出单独持久化为候选；幂等键可重放相同请求。后台 Worker、独立 Attempt/outbox、SSE 断线续传和取消尚未实现。视频/图像等长任务必须迁移到持久 Worker 后再开放。
 
 ## 数据与安全
 
 - 原文和用户媒体使用对象存储；数据库只存元数据、版本、哈希与受控 URI。
-- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。当前通过后端 `XZ_PROVIDER_SECRETS` 环境配置解析 `secret_ref`；尚未接入独立密钥库/加密主密钥。连通检查只支持本机访问的 OpenAI 兼容文本服务 `/models`，并默认阻止非公网 IP 目标；成功不代表生成执行器可用。身份认证上线前，不允许远端客户端触发带密钥的连通检查。
+- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。当前通过后端 `XZ_PROVIDER_SECRETS` 环境配置解析 `secret_ref`；尚未接入独立密钥库/加密主密钥。OpenAI 兼容文本档案会检查 `/models`，原创“故事圣经”使用 `/chat/completions` 生成候选；远程 API 默认阻止非公网 IP 目标。身份认证上线前，不允许远端客户端触发带密钥的连通检查。
 - 上传按扩展名、大小、内容 MIME、哈希校验；生产版还要做恶意文件扫描、压缩炸弹限制与安全下载。
 - 远程 URL 仅 HTTPS；本地 HTTP 仅允许 loopback。生产部署还需配置域名白名单和 DNS/IP 防 SSRF。
-- 项目权利状态及按模态外发授权在提交任务前必须由服务端 Preflight 检查。当前代码已经要求改编原文门禁记录权利状态，但 Provider 授权、身份认证与多用户权限尚未实现。
+- 改编原文门禁要求记录项目权利状态；每次文本生成还要求显式数据处理授权字段。该授权目前是单用户本地工作区内的请求确认，不是法律权利验证，也不替代后续的身份认证与多用户权限。
 
 ## 已落地的 API 范围
 
 - `GET /health`
 - `POST/GET /projects`、`GET /projects/{id}`
 - `GET /projects/{id}/stages`、`POST /projects/{id}/stages/{stage}/start`、`POST /projects/{id}/stages/{stage}/submit-review`、`POST /projects/{id}/stages/{stage}/decision`
-- `POST/GET /projects/{id}/chapters`、`POST /projects/{id}/chapters/upload`（TXT/MD）
+- `POST/GET /projects/{id}/chapters`、`POST /projects/{id}/chapters/upload`、`PUT /projects/{id}/chapters/{chapter_id}`、`GET /projects/{id}/chapters/{chapter_id}/versions`、`POST /projects/{id}/chapters/{chapter_id}/restore`（TXT/MD 导入、章节修订与恢复）
+- `PATCH /projects/{id}/rights`（原作权利状态）
 - `GET/PUT /projects/{id}/creative-brief`（仅原创项目；保存简报修订与权利确认声明，并进入作者确认门禁）
 - `GET/POST /projects/{id}/character-references`（角色锚点、服装规则与固定四视图清单；仅保存草稿，不生成图片）
-- `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（目前仅 OpenAI 兼容文本服务连通检查）
-- `POST/GET /projects/{id}/jobs`
+- `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（目前仅 OpenAI 兼容文本服务）
+- `POST/GET /projects/{id}/jobs`、`PUT /projects/{id}/jobs/{job_id}/output`、`GET /projects/{id}/jobs/{job_id}/output/versions`（当前仅原创故事圣经真实文本生成；请求需数据处理授权并要求阶段处于 running；候选可人工修订并保留旧版本）
 - Swagger UI：`/docs`
 
-后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。Provider 实现将放入 `infrastructure/providers/`，长任务执行器将单独放入 `workers/`，避免把外部服务调用塞进 API 路由。
-
-任务端点当前建立持久任务快照并对未注册 Adapter fail closed；这是安全占位行为，尚未声称连接任何模型或生成媒体。
+后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
 
 ## 开发启动
 
@@ -81,11 +80,11 @@ uv run uvicorn app.main:app --reload
 
 ### M0：领域 API 基础（当前）
 
-项目双入口和不同阶段路径、章节导入、阶段启动/送审/决定状态机、上游门禁、Provider profile 元数据、任务快照、审计事件。阶段候选当前尚未实现；送审接口仅推动流程状态，正式落地需连接真实 Candidate 和领域产物。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
+项目双入口和不同阶段路径、章节导入/修订/恢复、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经文本候选、任务快照、输出持久化和审计事件。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
 
 ### M1：创作纵切片
 
-补 SourceSpan、章节版本与拆分预览；接 OpenAI-compatible 文本 Adapter；实现原文分析候选、来源证据、改编大纲/剧本结构化输出、候选逐项接受/拒绝和结构化实体物化。首个验收项目：有权文本章节 → 可审阅故事卡/剧本候选 → 接受后可编辑。
+补 SourceSpan 与导入拆分预览；扩展文本 Adapter 到原文分析、改编大纲和剧本结构化输出；实现来源证据、候选逐项接受/拒绝和结构化实体物化。首个验收项目：有权文本章节 → 可审阅故事卡/剧本候选 → 接受后可编辑。
 
 ### M2：镜头与图片
 

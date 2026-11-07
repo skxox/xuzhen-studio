@@ -7,7 +7,7 @@ AI 主导、人工审阅的小说到视频制作工作台产品原型与研发�
 - `outputs/index.html`：可交互原型，包含“已有小说改编”和“从创意原创”两种入口；覆盖原文/创意输入、AI 阶段候选审阅、角色与美术设定、分集剧本、分镜、关键帧、视频、声音/字幕/合成、审片交付和交付后修订。
 - `outputs/PRODUCT_SPEC.md`：双入口工作流、各阶段门禁、交接/汇合契约、Provider API、任务状态、质量规则、按钮行为约定与端到端研发验收规格。
 - `ARCHITECTURE.md`：MVP 技术架构、领域边界、安全策略和研发里程碑。
-- `backend/`：FastAPI 后端代码，包含项目与阶段状态、服务档案、文本 Provider 连通检查、任务快照和审计 API。真实生成 Adapter/Worker 尚未接入。
+- `backend/`：FastAPI 后端代码，包含项目与阶段状态、服务档案、文本 Provider 连通检查、OpenAI 兼容文本生成、候选持久化和审计 API。当前原创入口的“故事圣经”可真实生成；图片/视频/语音 Adapter 与后台 Worker 尚未接入。
 - `frontend/`：React + TypeScript 工作台，含深浅主题、制片总览、小说/创意、剧本、分镜、流程画布、素材、交付和 Provider 设置页面。
 
 ## 预览
@@ -34,7 +34,7 @@ cp .env.example .env
 uv run uvicorn app.main:app --reload
 ```
 
-API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite；当前仅支持 OpenAI 兼容文本服务连通检查，不会调用文本/图像/视频模型生成内容。Provider Adapter 和后台 Worker 尚未完成，见 `ARCHITECTURE.md`。
+API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite；已支持 OpenAI 兼容文本服务连通检查，并可从原创简报生成故事圣经候选。图片、视频和语音仍需对应 Adapter；后台 Worker 与长任务恢复机制尚未完成，见 `ARCHITECTURE.md`。
 
 ## 产品原则
 

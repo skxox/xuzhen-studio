@@ -47,6 +47,14 @@ export const api = {
   commercialMaterialFileUrl: (projectId: string, materialId: string) => `${API_ROOT}/projects/${projectId}/commercial-materials/${materialId}/file`,
   stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
+  startStage: (projectId: string, stage: string) =>
+    request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(`/projects/${projectId}/stages/${stage}/start`, { method: 'POST' }),
+  createTextJob: (projectId: string, body: { stage_key: string; profile_id: string; idempotency_key: string; prompt: string; parameters: Record<string, unknown>; input_refs: string[]; data_authorized: boolean }) =>
+    request<{ id: string; status: string; output?: { id: string; content_type: string; content: string; metadata: Record<string, unknown> } | null; error?: Record<string, unknown> }>(`/projects/${projectId}/jobs`, { method: 'POST', body: JSON.stringify({ ...body, modality: 'text' }) }),
+  updateJobOutput: (projectId: string, jobId: string, content: string, revision: number) =>
+    request<{ id: string; job_id: string; content_type: string; content: string; metadata: Record<string, unknown>; revision: number }>(`/projects/${projectId}/jobs/${jobId}/output`, { method: 'PUT', body: JSON.stringify({ content, revision }) }),
+  jobOutputVersions: (projectId: string, jobId: string) =>
+    request<Array<{ revision: number; content: string; created_at: string }>>(`/projects/${projectId}/jobs/${jobId}/output/versions`),
   submitStageReview: (projectId: string, stage: string) =>
     request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(`/projects/${projectId}/stages/${stage}/submit-review`, { method: 'POST' }),
   decideStage: (projectId: string, stage: string, action: 'accept' | 'reject', reason?: string) =>
@@ -61,5 +69,5 @@ export const api = {
   createServiceProfile: (projectId: string, body: Omit<ServiceProfile, 'id' | 'enabled' | 'version'> & { capabilities?: Record<string, unknown> }) =>
     request<ServiceProfile>(`/projects/${projectId}/service-profiles`, { method: 'POST', body: JSON.stringify(body) }),
   testServiceProfile: (projectId: string, profileId: string) =>
-    request<{ status: 'connected'; model_available: true; checked_at: string; execution_ready: false; message: string }>(`/projects/${projectId}/service-profiles/${profileId}/test`, { method: 'POST' }),
+    request<{ status: 'connected'; model_available: true; checked_at: string; execution_ready: true; message: string }>(`/projects/${projectId}/service-profiles/${profileId}/test`, { method: 'POST' }),
 };

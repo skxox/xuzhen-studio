@@ -31,7 +31,7 @@ export function SettingsPage({ project }: { project?: Project }) {
     create.mutate({ modality, name: name.trim(), adapter_id: adapter, transport, endpoint, model_id: model.trim(), secret_ref: secretRef.trim() || undefined, capabilities: {} });
   };
   return <div className="settings-page"><PageHeading eyebrow="WORKSPACE CONFIGURATION" title="服务由你选择，密钥留在安全边界内。" description="项目可以混用不同厂商的文本、图片、视频和语音 API。只有已登记且经过能力校验的服务，才能进入正式生成。" actions={<Badge tone="blue">API / 本机服务</Badge>} />
-    <div className="settings-warning"><Shield size={16}/><span><b>安全边界：</b>真实 API Key 不进入浏览器或数据库；请在后端环境变量 <code>XZ_PROVIDER_SECRETS</code> 中配置密钥引用。当前连通检查只支持本机访问的 OpenAI 兼容文本服务，检查通过也不代表生成执行器已接入。</span></div>
+    <div className="settings-warning"><Shield size={16}/><span><b>安全边界：</b>真实 API Key 不进入浏览器或数据库；请在后端环境变量 <code>XZ_PROVIDER_SECRETS</code> 中配置密钥引用。当前已接入 OpenAI 兼容文本生成；图片、视频和语音档案仍需对应 Adapter 后才能执行。</span></div>
     <div className="settings-layout"><Panel className="profile-form"><div className="panel-heading"><div><div className="eyebrow">NEW SERVICE PROFILE</div><h3>登记模型服务</h3><p>按模态分别配置；项目/阶段节点可在生成前选择具体档案。</p></div><Plus size={17}/></div>
       {!projectId && <div className="inline-notice">先创建服务端项目，才能给它登记 Provider 档案。</div>}
       <div className="modality-choice" role="tablist" aria-label="服务模态">{([{key:'text',label:'文本',icon:Sparkles},{key:'image',label:'图片',icon:Image},{key:'video',label:'视频',icon:Video},{key:'audio',label:'语音',icon:Volume2}] as const).map(({key,label,icon:Icon})=><button key={key} role="tab" aria-selected={modality===key} className={modality===key?'is-active':''} onClick={()=>selectModality(key)}><Icon size={15}/>{label}</button>)}</div>

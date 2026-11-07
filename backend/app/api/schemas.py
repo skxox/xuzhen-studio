@@ -122,9 +122,25 @@ class GateDecision(BaseModel):
 
 class JobCreate(BaseModel):
     modality: Literal["text", "image", "video", "audio"]
-    stage_key: str
-    profile_id: str
+    stage_key: str = Field(min_length=1, max_length=32)
+    profile_id: str = Field(min_length=1, max_length=36)
     idempotency_key: str = Field(min_length=8, max_length=200)
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=100_000)
     parameters: dict = Field(default_factory=dict)
-    input_refs: list[str] = Field(default_factory=list)
+    input_refs: list[str] = Field(default_factory=list, max_length=100)
+    data_authorized: bool = False
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def normalize_prompt(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class GenerationOutputEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=2_000_000)
+    revision: int = Field(ge=1)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def normalize_content(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value

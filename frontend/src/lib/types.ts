@@ -129,6 +129,7 @@ export interface GenerationJobSummary {
   status: string;
   input_snapshot: Record<string, unknown>;
   provider_snapshot: Record<string, unknown>;
+  output?: { id: string; content_type: string; content: string; metadata: Record<string, unknown>; revision?: number } | null;
   error: Record<string, unknown>;
   created_at: string;
 }

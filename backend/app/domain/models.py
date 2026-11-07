@@ -154,6 +154,27 @@ class GenerationJob(Timestamped, Base):
     __table_args__ = (UniqueConstraint("project_id", "idempotency_key", name="uq_job_idempotency"),)
 
 
+class GenerationOutput(Timestamped, Base):
+    __tablename__ = "generation_outputs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("generation_jobs.id", ondelete="CASCADE"), unique=True, index=True)
+    content_type: Mapped[str] = mapped_column(String(120), default="text/plain")
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class GenerationOutputVersion(Base):
+    __tablename__ = "generation_output_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    output_id: Mapped[str] = mapped_column(ForeignKey("generation_outputs.id", ondelete="CASCADE"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("output_id", "revision", name="uq_generation_output_revision"),)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -134,7 +134,7 @@ function AppShell() {
         <Route path="/writing" element={<WritingPage />} />
         <Route path="/storyboard" element={<StoryboardPage />} />
         <Route path="/canvas" element={<CanvasPage />} />
-        <Route path="/assets" element={<AssetsPage />} />
+        <Route path="/assets" element={<AssetsPage project={project} />} />
         <Route path="/delivery" element={<DeliveryPage />} />
         <Route path="/settings" element={<SettingsPage project={project} />} />
         <Route path="*" element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />} />

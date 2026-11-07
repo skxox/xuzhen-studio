@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 class ProjectCreate(BaseModel):
@@ -18,6 +18,17 @@ class ChapterCreate(BaseModel):
     body: str = Field(min_length=1)
     ordinal: int = Field(ge=1)
     source_name: str | None = None
+
+
+class CharacterReferenceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    immutable_features: str = Field(min_length=1, max_length=2000)
+    costume_rules: str = Field(min_length=1, max_length=1200)
+
+    @field_validator("name", "immutable_features", "costume_rules", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class ServiceProfileCreate(BaseModel):

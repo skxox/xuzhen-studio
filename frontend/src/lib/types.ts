@@ -36,6 +36,25 @@ export interface ChapterImportResult {
   review_required: boolean;
 }
 
+export interface CharacterReference {
+  id: string;
+  project_id: string;
+  name: string;
+  immutable_features: string;
+  costume_rules: string;
+  reference_views: Array<'front_full_body' | 'side_full_body' | 'back_full_body' | 'expression_sheet'>;
+  status: 'draft' | 'needs_review' | 'accepted' | 'rejected';
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CharacterReferenceCreateInput {
+  name: string;
+  immutable_features: string;
+  costume_rules: string;
+}
+
 export interface ServiceProfile {
   id: string;
   modality: string;

@@ -1,4 +1,4 @@
-import type { ApiHealth, Chapter, ChapterImportResult, Project, ProjectCreateInput, ServiceProfile } from './types';
+import type { ApiHealth, Chapter, ChapterImportResult, CharacterReference, CharacterReferenceCreateInput, Project, ProjectCreateInput, ServiceProfile } from './types';
 
 const API_ROOT = import.meta.env.VITE_API_ROOT ?? '/api';
 
@@ -20,6 +20,9 @@ export const api = {
   createProject: (body: ProjectCreateInput) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(body) }),
   chapters: (projectId: string) => request<Chapter[]>(`/projects/${projectId}/chapters`),
+  characterReferences: (projectId: string) => request<CharacterReference[]>(`/projects/${projectId}/character-references`),
+  createCharacterReference: (projectId: string, body: CharacterReferenceCreateInput) =>
+    request<CharacterReference>(`/projects/${projectId}/character-references`, { method: 'POST', body: JSON.stringify(body) }),
   uploadChapters: async (projectId: string, file: File) => {
     const form = new FormData(); form.append('file', file);
     const response = await fetch(`${API_ROOT}/projects/${projectId}/chapters/upload`, { method: 'POST', body: form });

@@ -8,9 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..domain.models import AuditEvent, Chapter, GenerationJob, Project, ServiceProfile, StageState
+from ..domain.models import AuditEvent, CharacterReference, Chapter, GenerationJob, Project, ServiceProfile, StageState
 from ..infrastructure.database import SessionLocal
-from .schemas import ChapterCreate, GateDecision, JobCreate, ProjectCreate, ServiceProfileCreate
+from .schemas import CharacterReferenceCreate, ChapterCreate, GateDecision, JobCreate, ProjectCreate, ServiceProfileCreate
 
 VIDEO_STAGES = ("source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
 NOVEL_STAGES = ("creativeBrief", "storyBible", "novelOutline", "literaryCharacters", "novelDraft", "continuity", "manuscriptRelease", "source", "outline", "characters", "art", "script", "shotDesign", "keyframes", "video", "post", "delivery")
@@ -66,6 +66,13 @@ def safe_project(p: Project):
             "genre": p.genre, "target_episodes": p.target_episodes, "episode_seconds": p.episode_seconds,
             "aspect_ratio": p.aspect_ratio, "rights_status": p.rights_status,
             "created_at": p.created_at, "updated_at": p.updated_at}
+
+
+def safe_character_reference(item: CharacterReference):
+    return {"id": item.id, "project_id": item.project_id, "name": item.name,
+            "immutable_features": item.immutable_features, "costume_rules": item.costume_rules,
+            "reference_views": item.reference_views, "status": item.status,
+            "version": item.version, "created_at": item.created_at, "updated_at": item.updated_at}
 
 
 @router.get("/health")
@@ -170,6 +177,30 @@ def list_chapters(project_id: str, db: Session = Depends(get_db)):
     items = db.scalars(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.ordinal)).all()
     return [{"id": c.id, "ordinal": c.ordinal, "title": c.title, "body": c.body,
              "content_hash": c.content_hash, "version": c.version, "source_name": c.source_name} for c in items]
+
+
+@router.get("/projects/{project_id}/character-references")
+def list_character_references(project_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    items = db.scalars(select(CharacterReference).where(
+        CharacterReference.project_id == project_id
+    ).order_by(CharacterReference.created_at.desc())).all()
+    return [safe_character_reference(item) for item in items]
+
+
+@router.post("/projects/{project_id}/character-references", status_code=201)
+def create_character_reference(project_id: str, data: CharacterReferenceCreate, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    item = CharacterReference(project_id=project_id, **data.model_dump())
+    db.add(item)
+    db.flush()
+    audit(db, project_id, "character_reference.draft_created", item.id, {
+        "name": item.name, "version": item.version, "status": item.status,
+        "reference_views": item.reference_views,
+    })
+    db.commit()
+    db.refresh(item)
+    return safe_character_reference(item)
 
 
 @router.post("/projects/{project_id}/stages/{stage_key}/decision")

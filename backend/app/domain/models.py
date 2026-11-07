@@ -49,6 +49,20 @@ class Chapter(Timestamped, Base):
     __table_args__ = (UniqueConstraint("project_id", "ordinal", "version", name="uq_chapter_version"),)
 
 
+class CharacterReference(Timestamped, Base):
+    __tablename__ = "character_references"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    immutable_features: Mapped[str] = mapped_column(Text)
+    costume_rules: Mapped[str] = mapped_column(Text)
+    reference_views: Mapped[list[str]] = mapped_column(JSON, default=lambda: [
+        "front_full_body", "side_full_body", "back_full_body", "expression_sheet"
+    ])
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
 class StageState(Timestamped, Base):
     __tablename__ = "stage_states"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

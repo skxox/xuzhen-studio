@@ -13,8 +13,6 @@ from ..domain.models import (
     CreativeBrief,
     EpisodeAdaptationOutline,
     EpisodeSourceMapping,
-    GenerationJob,
-    GenerationOutput,
     KeyframeCandidate,
     ManuscriptRelease,
     ScriptRelease,
@@ -26,12 +24,9 @@ from ..services.adaptation_decisions import (
     AdaptationDecisionError,
     AdaptationDecisions,
     validate_adaptation_decision,
+    validate_asset_decision,
 )
-from ..services.adaptation_mapping import (
-    EpisodeSourceMappingError,
-    current_adaptation_branch,
-    current_adaptation_outline_context,
-)
+from ..services.adaptation_mapping import current_adaptation_branch
 from ..services.keyframe_plan import (
     KeyframePlanError,
     current_shot_plan_release,
@@ -39,13 +34,12 @@ from ..services.keyframe_plan import (
 )
 from ..services.media_decisions import MediaDecisionError, validate_media_decision
 from ..services.novel_decisions import NovelDecisionError, validate_novel_decision
+from ..services.workflow_policy import StageDecisionPolicyError, validate_stage_decision
 from .common import (
-    ALLOWED,
     audit,
     get_db,
     project_or_404,
     refresh_ready_stages,
-    stage_dependencies,
 )
 from .schemas import (
     GateDecision,
@@ -66,41 +60,18 @@ def decide_stage(
     )
     if not stage:
         raise HTTPException(404, "stage_not_found")
-    if stage.status != "needs_review":
-        raise HTTPException(409, "stage_must_be_in_needs_review_before_decision")
-    if stage_key == "creativeBrief" and data.action == "waive":
-        raise HTTPException(422, "creative_brief_cannot_be_waived")
-    if stage_key == "commercialBrief" and data.action == "waive":
-        raise HTTPException(422, "commercial_brief_cannot_be_waived")
-    if (
-        stage_key
-        in {"source", "outline", "shotDesign", "keyframes", "video", "voice", "post", "delivery"}
-        and data.action == "waive"
-    ):
-        raise HTTPException(422, "media_production_gates_cannot_be_waived")
-    if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
-        raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
-    if data.action in {"waive", "reject"} and not data.reason:
-        raise HTTPException(422, "reason_required")
-    if data.action == "waive" and not data.risk_ack:
-        raise HTTPException(422, "risk_ack_required")
-    targets = {"accept": "accepted", "waive": "waived", "reject": "blocked"}
-    target = targets[data.action]
-    if target not in ALLOWED.get(stage.status, set()):
-        raise HTTPException(409, f"invalid_transition:{stage.status}->{target}")
-    if data.action in {"accept", "waive"}:
-        deps = stage_dependencies(project, stage_key)
-        dep_states = {
-            s.stage_key: s.status
-            for s in db.scalars(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key.in_(deps)
-                )
-            ).all()
-        }
-        missing = [key for key in deps if dep_states.get(key) not in {"accepted", "waived"}]
-        if missing:
-            raise HTTPException(409, {"code": "upstream_gate_blocked", "stages": missing})
+    try:
+        target = validate_stage_decision(
+            db,
+            project,
+            stage,
+            stage_key,
+            action=data.action,
+            reason=data.reason,
+            risk_ack=data.risk_ack,
+        )
+    except StageDecisionPolicyError as error:
+        raise HTTPException(error.status_code, error.detail) from None
     if stage_key == "source" and data.action == "accept" and project.creation_mode == "adaptation":
         if not db.scalar(select(Chapter.id).where(Chapter.project_id == project_id)):
             raise HTTPException(422, "source_requires_at_least_one_chapter")
@@ -128,62 +99,11 @@ def decide_stage(
     voice_script = media_candidates.voice_script
     edit_package = media_candidates.edit_package
     delivery_master = media_candidates.delivery_master
-    if (
-        stage_key in {"characters", "art"}
-        and data.action == "accept"
-        and project.creation_mode == "original"
-    ):
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == stage_key,
-                GenerationJob.status == "succeeded",
-            )
-        )
-        output = (
-            db.scalar(
-                select(GenerationOutput.id).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        if not candidate_job or not output:
-            raise HTTPException(409, "adaptation_asset_candidate_missing")
+    if data.action == "accept":
         try:
-            branch, outline_release, _ = current_adaptation_outline_context(db, project)
-        except EpisodeSourceMappingError as error:
-            raise HTTPException(409, str(error)) from None
-        scope = candidate_job.input_snapshot.get("scope") or {}
-        refs = set(candidate_job.input_snapshot.get("input_refs", []))
-        if (
-            scope.get("branch_id") != branch.id
-            or scope.get("outline_release_id") != outline_release.id
-            or not {branch.id, outline_release.id, outline_release.job_id}.issubset(refs)
-        ):
-            raise HTTPException(409, "adaptation_asset_candidate_scope_changed")
-        if stage_key == "art":
-            character_stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id,
-                    StageState.stage_key == "characters",
-                )
-            )
-            character_job_id = (
-                (character_stage.decision or {}).get("candidate_job_id")
-                if character_stage and character_stage.status == "accepted"
-                else None
-            )
-            if (
-                not character_job_id
-                or scope.get("character_job_id") != character_job_id
-                or character_job_id not in refs
-            ):
-                raise HTTPException(409, "accepted_video_character_constraints_required")
+            validate_asset_decision(db, project, stage, stage_key)
+        except AdaptationDecisionError as error:
+            raise HTTPException(error.status_code, error.detail) from None
     try:
         novel_decisions = validate_novel_decision(
             db,

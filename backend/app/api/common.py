@@ -12,6 +12,7 @@ from ..domain.models import (
     StageState,
 )
 from ..infrastructure.database import SessionLocal
+from ..services.workflow_policy import stage_dependencies
 
 VIDEO_STAGES = (
     "source",
@@ -59,27 +60,6 @@ COMMERCIAL_STAGES = (
     "post",
     "delivery",
 )
-DEPENDENCIES = {
-    "source": (),
-    "outline": ("source",),
-    "characters": ("outline",),
-    "art": ("outline", "characters"),
-    "script": ("outline", "characters", "art"),
-    "voice": ("script",),
-    "shotDesign": ("script", "characters", "art"),
-    "keyframes": ("shotDesign",),
-    "video": ("shotDesign", "keyframes"),
-    "post": ("video", "voice"),
-    "delivery": ("post",),
-    "creativeBrief": (),
-    "commercialBrief": (),
-    "storyBible": ("creativeBrief",),
-    "novelOutline": ("storyBible",),
-    "literaryCharacters": ("storyBible", "novelOutline"),
-    "novelDraft": ("novelOutline", "literaryCharacters"),
-    "continuity": ("novelDraft",),
-    "manuscriptRelease": ("continuity",),
-}
 STAGE_METADATA = {
     "commercialBrief": ("商品与素材简报", "产品策划", "产品事实、受众、卖点、宣传边界与投放目标"),
     "creativeBrief": ("创意简报", "创作规划", "故事 premise、题材与创作边界"),
@@ -101,17 +81,6 @@ STAGE_METADATA = {
     "post": ("声音与成片", "后期合成", "配音、字幕与合成版本"),
     "delivery": ("审片与交付", "交付检查", "审片记录与交付 manifest"),
 }
-ALLOWED = {
-    "not_started": {"ready", "blocked"},
-    "ready": {"running", "blocked"},
-    "running": {"needs_review", "failed", "blocked"},
-    "needs_review": {"accepted", "waived", "running", "blocked"},
-    "accepted": {"running", "stale"},
-    "waived": {"running", "stale"},
-    "blocked": {"ready", "running", "stale"},
-    "stale": {"ready", "running", "blocked"},
-    "failed": {"ready", "running", "stale"},
-}
 
 
 def get_db():
@@ -131,14 +100,6 @@ def project_or_404(db: Session, project_id: str) -> Project:
     if not obj:
         raise HTTPException(404, "project_not_found")
     return obj
-
-
-def stage_dependencies(project: Project, stage_key: str) -> tuple[str, ...]:
-    if stage_key == "outline" and project.creation_mode == "commercial":
-        return ("commercialBrief",)
-    if stage_key == "source" and project.creation_mode == "original":
-        return ("manuscriptRelease",)
-    return DEPENDENCIES.get(stage_key, ())
 
 
 def invalidate_downstream_stages(db: Session, project: Project, stage_key: str) -> None:

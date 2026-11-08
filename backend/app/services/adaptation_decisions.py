@@ -7,6 +7,7 @@ from ..domain.models import GenerationJob, GenerationOutput, Project, StageState
 from .adaptation_mapping import (
     EpisodeSourceMappingError,
     current_adaptation_branch,
+    current_adaptation_outline_context,
     current_adaptation_script_context,
     current_adaptation_script_release_context,
     current_release_chapters,
@@ -48,6 +49,64 @@ def validate_adaptation_decision(
     if stage_key == "shotDesign":
         return AdaptationDecisions(shot_plan=_validate_shot_plan(db, project, stage))
     return AdaptationDecisions()
+
+
+def validate_asset_decision(
+    db: Session, project: Project, stage: StageState, stage_key: str
+) -> None:
+    if project.creation_mode != "original" or stage_key not in {"characters", "art"}:
+        return
+    job_id = (stage.decision or {}).get("candidate_job_id")
+    job = db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.id == job_id,
+            GenerationJob.project_id == project.id,
+            GenerationJob.stage_key == stage_key,
+            GenerationJob.status == "succeeded",
+        )
+    )
+    output_id = (
+        db.scalar(
+            select(GenerationOutput.id).where(
+                GenerationOutput.project_id == project.id,
+                GenerationOutput.job_id == job_id,
+            )
+        )
+        if job
+        else None
+    )
+    if not job or not output_id:
+        raise AdaptationDecisionError(409, "adaptation_asset_candidate_missing")
+    try:
+        branch, outline_release, _ = current_adaptation_outline_context(db, project)
+    except EpisodeSourceMappingError as error:
+        raise AdaptationDecisionError(409, str(error)) from None
+    scope = job.input_snapshot.get("scope") or {}
+    refs = set(job.input_snapshot.get("input_refs", []))
+    if (
+        scope.get("branch_id") != branch.id
+        or scope.get("outline_release_id") != outline_release.id
+        or not {branch.id, outline_release.id, outline_release.job_id}.issubset(refs)
+    ):
+        raise AdaptationDecisionError(409, "adaptation_asset_candidate_scope_changed")
+    if stage_key == "art":
+        character_stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project.id,
+                StageState.stage_key == "characters",
+            )
+        )
+        character_job_id = (
+            (character_stage.decision or {}).get("candidate_job_id")
+            if character_stage and character_stage.status == "accepted"
+            else None
+        )
+        if (
+            not character_job_id
+            or scope.get("character_job_id") != character_job_id
+            or character_job_id not in refs
+        ):
+            raise AdaptationDecisionError(409, "accepted_video_character_constraints_required")
 
 
 def _candidate_output(

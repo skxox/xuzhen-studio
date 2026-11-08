@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,18 +29,17 @@ from ..services.adaptation_mapping import (
     current_adaptation_script_context,
     current_adaptation_script_release_context,
     current_release_chapters,
-    parse_adaptation_outline,
-    parse_episode_source_mapping,
-    parse_script_candidate,
-    parse_storyboard_plan,
 )
-from ..services.continuity import ContinuityReportError, parse_continuity_report
+from ..services.generation_candidate_validation import (
+    GenerationCandidateValidationError,
+    latest_project_chapters,
+    validate_generation_candidate,
+)
 from ..services.keyframe_plan import (
     KeyframePlanError,
     current_shot_plan_release,
     find_shot,
 )
-from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
 from ..services.openai_compatible_audio import generate_speech
 from ..services.openai_compatible_image import generate_image
@@ -137,7 +136,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             or chapter_end - chapter_start >= 20
         ):
             raise HTTPException(422, "continuity_scope_must_include_one_to_twenty_chapters")
-        latest_chapters = _latest_chapters(db, project_id)
+        latest_chapters = latest_project_chapters(db, project_id)
         context_ordinal = chapter_start - 1 if chapter_start > 1 else None
         chapter_texts = {
             ordinal: latest_chapters[ordinal].body
@@ -667,229 +666,16 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             "provider_snapshot": job.provider_snapshot,
         }
     db.expire_all()
-    if data.stage_key == "novelDraft":
-        try:
-            expected_ordinal = data.scope.get("chapter_ordinal")
-            if not isinstance(expected_ordinal, int) or expected_ordinal < 1:
-                raise NovelDraftCandidateError("章节任务缺少有效的目标序号。")
-            parse_chapter_candidate(content, expected_ordinal)
-        except NovelDraftCandidateError as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_novel_chapter_candidate", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
-    if data.stage_key == "shotDesign" and project.creation_mode == "original":
-        try:
-            branch, outline_release, outline_episodes, script_release, character_job, art_job = (
-                current_adaptation_script_release_context(db, project)
-            )
-            scope = job.input_snapshot.get("scope") or {}
-            if (
-                scope.get("branch_id") != branch.id
-                or scope.get("outline_release_id") != outline_release.id
-                or scope.get("script_release_id") != script_release.id
-            ):
-                raise EpisodeSourceMappingError("分镜候选引用的剧本版本已变化。")
-            parse_storyboard_plan(
-                content,
-                branch_id=branch.id,
-                script_release_id=script_release.id,
-                character_job_id=character_job.id,
-                art_job_id=art_job.id,
-                script_episodes=script_release.episodes,
-                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-            )
-        except (EpisodeSourceMappingError, KeyError) as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_storyboard_plan", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
-    if data.stage_key == "continuity":
-        try:
-            _validate_continuity_output(db, project_id, job, content, allow_review_decisions=False)
-        except ContinuityReportError as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_continuity_report", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
-    if data.stage_key == "source" and project.creation_mode == "original":
-        try:
-            scope = job.input_snapshot.get("scope") or {}
-            _, release_chapters = current_release_chapters(
-                db, project, str(scope.get("release_id", ""))
-            )
-            parse_episode_source_mapping(
-                content,
-                expected_release_id=scope["release_id"],
-                expected_episode_count=scope["episode_count"],
-                expected_episode_seconds=scope["episode_seconds"],
-                expected_aspect_ratio=scope["aspect_ratio"],
-                allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
-            )
-        except (EpisodeSourceMappingError, KeyError) as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_episode_source_mapping", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
-    if data.stage_key == "outline" and project.creation_mode == "original":
-        try:
-            branch, mappings = current_adaptation_branch(db, project)
-            _, release_chapters = current_release_chapters(db, project, branch.release_id)
-            scope = job.input_snapshot.get("scope") or {}
-            if scope.get("branch_id") != branch.id:
-                raise EpisodeSourceMappingError("改编分支已变化，大纲候选已失效。")
-            parse_adaptation_outline(
-                content,
-                branch_id=branch.id,
-                release_id=branch.release_id,
-                episode_seconds=branch.episode_seconds,
-                aspect_ratio=branch.aspect_ratio,
-                mappings=[{"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings],
-            )
-            if not {chapter.id for chapter in release_chapters}.issubset(
-                set(job.input_snapshot.get("input_refs", []))
-            ):
-                raise EpisodeSourceMappingError("锁版章节输入引用已变化。")
-        except EpisodeSourceMappingError as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_adaptation_outline", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
-    if data.stage_key == "script" and project.creation_mode == "original":
-        try:
-            branch, outline_release, outline_episodes, character_job, art_job = (
-                current_adaptation_script_context(db, project)
-            )
-            _, release_chapters = current_release_chapters(db, project, branch.release_id)
-            scope = job.input_snapshot.get("scope") or {}
-            if (
-                scope.get("branch_id") != branch.id
-                or scope.get("outline_release_id") != outline_release.id
-            ):
-                raise EpisodeSourceMappingError("剧本上游版本已变化，当前候选不可用。")
-            parse_script_candidate(
-                content,
-                branch_id=branch.id,
-                release_id=branch.release_id,
-                outline_release_id=outline_release.id,
-                character_job_id=character_job.id,
-                art_job_id=art_job.id,
-                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-                chapter_bodies={chapter.ordinal: chapter.body for chapter in release_chapters},
-            )
-        except EpisodeSourceMappingError as error:
-            stage = db.scalar(
-                select(StageState).where(
-                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
-                )
-            )
-            job.status = "failed"
-            job.error = {"code": "invalid_episode_script", "message": str(error)}
-            if (
-                stage
-                and stage.status == "running"
-                and stage.version == job.input_snapshot["stage_version"]
-            ):
-                stage.status = "failed"
-                stage.version += 1
-            audit(db, project_id, "job.failed", job.id, job.error)
-            db.commit()
-            return {
-                "id": job.id,
-                "status": job.status,
-                "error": job.error,
-                "provider_snapshot": job.provider_snapshot,
-            }
+    try:
+        validate_generation_candidate(
+            db,
+            project,
+            job,
+            content,
+            allow_review_decisions=False,
+        )
+    except GenerationCandidateValidationError as error:
+        return _record_candidate_validation_failure(db, project_id, job, error)
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
@@ -1143,111 +929,30 @@ def edit_generation_output(
         raise HTTPException(409, "generation_output_revision_conflict")
     if stage.status != "needs_review" or (stage.decision or {}).get("candidate_job_id") != job_id:
         raise HTTPException(409, "generation_candidate_is_not_current")
-    if job.stage_key == "novelDraft":
-        expected_ordinal = (job.input_snapshot.get("scope") or {}).get("chapter_ordinal")
-        try:
-            if not isinstance(expected_ordinal, int):
-                raise NovelDraftCandidateError("章节任务缺少有效的目标序号。")
-            parse_chapter_candidate(data.content, expected_ordinal)
-        except NovelDraftCandidateError as error:
-            raise HTTPException(422, str(error)) from None
-    if job.stage_key == "continuity":
-        try:
-            _validate_continuity_output(
-                db, project_id, job, data.content, allow_review_decisions=True
-            )
-        except ContinuityReportError as error:
-            raise HTTPException(422, str(error)) from None
-    if job.stage_key == "source":
-        project = project_or_404(db, project_id)
-        if project.creation_mode == "original":
-            try:
-                scope = job.input_snapshot.get("scope") or {}
-                _, release_chapters = current_release_chapters(
-                    db, project, str(scope.get("release_id", ""))
-                )
-                parse_episode_source_mapping(
-                    data.content,
-                    expected_release_id=scope["release_id"],
-                    expected_episode_count=scope["episode_count"],
-                    expected_episode_seconds=scope["episode_seconds"],
-                    expected_aspect_ratio=scope["aspect_ratio"],
-                    allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
-                )
-            except (EpisodeSourceMappingError, KeyError) as error:
-                raise HTTPException(422, str(error)) from None
-    if job.stage_key == "outline":
-        project = project_or_404(db, project_id)
-        if project.creation_mode == "original":
-            try:
-                branch, mappings = current_adaptation_branch(db, project)
-                scope = job.input_snapshot.get("scope") or {}
-                if scope.get("branch_id") != branch.id:
-                    raise EpisodeSourceMappingError("改编分支已变化，大纲候选已失效。")
-                parse_adaptation_outline(
-                    data.content,
-                    branch_id=branch.id,
-                    release_id=branch.release_id,
-                    episode_seconds=branch.episode_seconds,
-                    aspect_ratio=branch.aspect_ratio,
-                    mappings=[
-                        {"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings
-                    ],
-                )
-            except (EpisodeSourceMappingError, KeyError) as error:
-                raise HTTPException(422, str(error)) from None
-    if job.stage_key == "script":
-        project = project_or_404(db, project_id)
-        if project.creation_mode == "original":
-            try:
-                branch, outline_release, outline_episodes, character_job, art_job = (
-                    current_adaptation_script_context(db, project)
-                )
-                _, release_chapters = current_release_chapters(db, project, branch.release_id)
-                scope = job.input_snapshot.get("scope") or {}
-                if (
-                    scope.get("branch_id") != branch.id
-                    or scope.get("outline_release_id") != outline_release.id
-                ):
-                    raise EpisodeSourceMappingError("剧本上游版本已变化。")
-                parse_script_candidate(
-                    data.content,
-                    branch_id=branch.id,
-                    release_id=branch.release_id,
-                    outline_release_id=outline_release.id,
-                    character_job_id=character_job.id,
-                    art_job_id=art_job.id,
-                    outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-                    chapter_bodies={chapter.ordinal: chapter.body for chapter in release_chapters},
-                )
-            except (EpisodeSourceMappingError, KeyError) as error:
-                raise HTTPException(422, str(error)) from None
-    if job.stage_key == "shotDesign":
-        project = project_or_404(db, project_id)
-        if project.creation_mode == "original":
-            try:
-                (
-                    branch,
-                    outline_release,
-                    outline_episodes,
-                    script_release,
-                    character_job,
-                    art_job,
-                ) = current_adaptation_script_release_context(db, project)
-                scope = job.input_snapshot.get("scope") or {}
-                if scope.get("script_release_id") != script_release.id:
-                    raise EpisodeSourceMappingError("剧本上游版本已变化。")
-                parse_storyboard_plan(
-                    data.content,
-                    branch_id=branch.id,
-                    script_release_id=script_release.id,
-                    character_job_id=character_job.id,
-                    art_job_id=art_job.id,
-                    script_episodes=script_release.episodes,
-                    outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-                )
-            except (EpisodeSourceMappingError, KeyError) as error:
-                raise HTTPException(422, str(error)) from None
+    project = project_or_404(db, project_id)
+    try:
+        validate_generation_candidate(
+            db,
+            project,
+            job,
+            data.content,
+            allow_review_decisions=True,
+        )
+    except GenerationCandidateValidationError as error:
+        raise HTTPException(422, str(error)) from None
+    stage_transition = db.execute(
+        update(StageState)
+        .where(
+            StageState.id == stage.id,
+            StageState.status == "needs_review",
+            StageState.version == stage.version,
+        )
+        .values(version=StageState.version + 1)
+        .execution_options(synchronize_session=False)
+    )
+    if stage_transition.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "generation_candidate_is_not_current")
     db.add(
         GenerationOutputVersion(
             output_id=output.id,
@@ -1257,7 +962,6 @@ def edit_generation_output(
     )
     output.content = data.content
     output.revision += 1
-    stage.version += 1
     audit(
         db,
         project_id,
@@ -1278,58 +982,42 @@ def edit_generation_output(
     return safe_generation_output(output)
 
 
-def _latest_chapters(db: Session, project_id: str) -> dict[int, Chapter]:
-    items = db.scalars(
-        select(Chapter)
-        .where(Chapter.project_id == project_id)
-        .order_by(Chapter.ordinal, Chapter.version.desc())
-    ).all()
-    latest: dict[int, Chapter] = {}
-    for item in items:
-        latest.setdefault(item.ordinal, item)
-    return latest
-
-
-def _validate_continuity_output(
+def _record_candidate_validation_failure(
     db: Session,
     project_id: str,
     job: GenerationJob,
-    content: str,
-    *,
-    allow_review_decisions: bool,
-):
-    scope = job.input_snapshot.get("scope") or {}
-    chapter_start = scope.get("chapter_start")
-    chapter_end = scope.get("chapter_end")
-    if type(chapter_start) is not int or type(chapter_end) is not int:
-        raise ContinuityReportError("审校任务缺少有效的章节范围。")
-    latest_chapters = _latest_chapters(db, project_id)
-    chapter_texts = {
-        ordinal: latest_chapters[ordinal].body
-        for ordinal in range(chapter_start, chapter_end + 1)
-        if ordinal in latest_chapters
-    }
-    context_ordinal = scope.get("context_chapter")
-    if type(context_ordinal) is int:
-        if context_ordinal not in latest_chapters:
-            raise ContinuityReportError("审校上下文章节版本已变化。")
-        chapter_texts[context_ordinal] = latest_chapters[context_ordinal].body
-    latest_ids = {
-        latest_chapters[ordinal].id
-        for ordinal in range(chapter_start, chapter_end + 1)
-        if ordinal in latest_chapters
-    }
-    if type(context_ordinal) is int and context_ordinal in latest_chapters:
-        latest_ids.add(latest_chapters[context_ordinal].id)
-    if not latest_ids.issubset(set(job.input_snapshot.get("input_refs", []))):
-        raise ContinuityReportError("审校期间章节版本已变化，请重新运行审校。")
-    return parse_continuity_report(
-        content,
-        chapter_start,
-        chapter_end,
-        chapter_texts,
-        allow_review_decisions=allow_review_decisions,
+    error: GenerationCandidateValidationError,
+) -> dict:
+    stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project_id,
+            StageState.stage_key == job.stage_key,
+        )
     )
+    current_execution = bool(
+        stage
+        and stage.status == "running"
+        and stage.version == job.input_snapshot.get("stage_version")
+    )
+    job.status = "failed" if current_execution else "stale"
+    job.error = {"code": error.code, "message": str(error)}
+    if current_execution and stage:
+        stage.status = "failed"
+        stage.version += 1
+    audit(
+        db,
+        project_id,
+        "job.failed" if current_execution else "job.result_stale",
+        job.id,
+        job.error,
+    )
+    db.commit()
+    return {
+        "id": job.id,
+        "status": job.status,
+        "error": job.error,
+        "provider_snapshot": job.provider_snapshot,
+    }
 
 
 def replay_generation_job(db: Session, job: GenerationJob, data: JobCreate) -> dict:

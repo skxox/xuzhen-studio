@@ -231,6 +231,40 @@ class KeyframeCandidate(Timestamped, Base):
     status: Mapped[str] = mapped_column(String(24), default="needs_review")
 
 
+class VideoCandidate(Timestamped, Base):
+    __tablename__ = "video_candidates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    shot_plan_release_id: Mapped[str] = mapped_column(
+        ForeignKey("shot_plan_releases.id", ondelete="RESTRICT"), index=True
+    )
+    keyframe_candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("keyframe_candidates.id", ondelete="RESTRICT"), index=True
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), unique=True, index=True
+    )
+    provider_task_id: Mapped[str] = mapped_column(String(240))
+    episode_number: Mapped[int] = mapped_column(Integer)
+    scene_number: Mapped[int] = mapped_column(Integer)
+    shot_number: Mapped[int] = mapped_column(Integer)
+    requested_seconds: Mapped[int] = mapped_column(Integer)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    provider_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="processing")
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -40,7 +40,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 
 目标任务生命周期为 `draft → validating → queued → submitting → submitted → running → collecting → needs_review`。
 
-当前已落地的文本纵切片在 API 请求内同步调用 Provider，任务状态为 `running → succeeded/failed/stale`，输出单独持久化为候选；幂等键可重放相同请求。后台 Worker、独立 Attempt/outbox、SSE 断线续传和取消尚未实现。视频/图像等长任务必须迁移到持久 Worker 后再开放。
+当前文本/图片生成在 API 请求内同步调用 Provider。视频 Adapter 在请求中提交远端异步任务并持久化任务 ID，由前端轮询 refresh API；任务状态与媒体结果可在页面重开后恢复，但服务端没有常驻 Worker、webhook、独立 Attempt/outbox、SSE 断线续传和取消能力。
 
 ## 数据与安全
 
@@ -81,7 +81,7 @@ uv run uvicorn app.main:app --reload
 
 ### M0：领域 API 基础（当前）
 
-项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、ManuscriptRelease、分集映射/大纲/剧本/分镜不可变版本、逐镜关键帧审阅、阶段门禁、Provider profile 与审计事件。文本可调用 OpenAI 兼容 Chat；关键帧可调用返回 `b64_json` 的 OpenAI 兼容 Images API，图片保存到开发媒体目录。生成仍在 API 请求内同步执行，且只实现上述两种协议。范围报告最多覆盖 20 个连续章节；全书长期记忆与 finding 单项修订跟踪仍需后续实现。
+项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、ManuscriptRelease、分集映射/大纲/剧本/分镜不可变版本、逐镜关键帧及视频审阅、阶段门禁、Provider profile 与审计事件。文本使用 OpenAI 兼容 Chat；关键帧使用返回 `b64_json` 的 OpenAI 兼容 Images API；视频使用异步 `/v1/videos` submit、`/{id}` 状态查询和 `/{id}/content` 下载协议。服务端固定 DNS 解析目标，视频只接受 MP4 签名并保存媒体。连接检查只验证 `/models` 模型 ID，无法证明视频能力兼容。视频任务轮询由工作台触发，用户离开期间远端继续生成，但没有本地后台轮询。范围报告最多覆盖 20 个连续章节；全书长期记忆与 finding 单项修订跟踪仍需后续实现。
 
 ### M1：创作纵切片
 
@@ -89,11 +89,11 @@ uv run uvicorn app.main:app --reload
 
 ### M2：镜头与图片
 
-仍需引入正式 Postgres/Redis/Object Storage、worker/outbox、ComfyUI Adapter 和资产生命周期。现有图片 Adapter 只覆盖 OpenAI 兼容 Images API 的 base64 响应；关键帧可按镜头生成、审阅、退回和重做，验收快照引用原分镜版本，不会反写或改动已锁定镜头。
+仍需引入正式 Postgres/Redis/Object Storage、worker/outbox/webhook、ComfyUI Adapter 和资产生命周期。现有图片 Adapter 只覆盖 OpenAI 兼容 Images API 的 base64 响应；关键帧与视频可逐镜生成、审阅、退回和重做，验收候选引用原分镜版本，不会反写或改动已锁定镜头。逐镜视频全部验收是后期阶段的服务端门禁。
 
-### M3：异步视频
+### M3：异步视频（首版已接入）
 
-实现视频供应商 Adapter、submit/poll/webhook、取消/重试/限流/成本快照、Asset Gateway。按镜头出视频候选，逐项审阅并只对失败镜头重跑。
+当前支持 OpenAI-compatible `/v1/videos` 的 submit/poll/content 子集，按镜头创建候选，采用已验收关键帧，并逐项审阅与重做。后续仍需增加后台 Worker/webhook、取消、队列限流、成本快照和多厂商能力声明/适配；“兼容协议”不等于所有服务商实现一致。
 
 ### M4：成片交付
 
@@ -101,4 +101,4 @@ uv run uvicorn app.main:app --reload
 
 ## 当前不具备的生产条件
 
-当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、视频/语音 Provider、媒体安全扫描和端到端成片。已支持的文本/图片同步 API 不代表任意厂商协议已接入；图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应。不能宣称系统已生成完整视频。每完成一项应更新规格差异表与 API schema。
+当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、语音 Provider、媒体安全扫描和端到端成片合成。视频仅接入特定 OpenAI-compatible 异步 API 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。当前可以生成并审核逐镜视频候选，但不能宣称已生成完整可交付成片。每完成一项应更新规格差异表与 API schema。

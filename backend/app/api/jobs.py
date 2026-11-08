@@ -17,6 +17,7 @@ from ..domain.models import (
     KeyframeCandidate,
     ServiceProfile,
     StageState,
+    VideoCandidate,
 )
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
@@ -39,6 +40,7 @@ from ..services.keyframe_plan import (
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
 from ..services.openai_compatible_image import generate_image
+from ..services.openai_compatible_video import download_video, retrieve_video, submit_video
 from .common import (
     audit,
     get_db,
@@ -249,6 +251,51 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             raise HTTPException(409, "keyframe_shot_snapshot_changed")
         if set(data.parameters) - {"size", "quality"}:
             raise HTTPException(422, "unsupported_image_generation_parameters")
+    video_keyframe = None
+    if data.stage_key == "video":
+        if data.modality != "video" or profile.adapter_id != "openai-compatible-video":
+            raise HTTPException(422, "video_generation_requires_video_adapter")
+        if project.creation_mode != "original":
+            raise HTTPException(422, "video_generation_requires_original_project")
+        try:
+            release = current_shot_plan_release(db, project)
+            episode_number = scope_number(data.scope, "episode_number")
+            scene_number = scope_number(data.scope, "scene_number")
+            shot_number = scope_number(data.scope, "shot_number")
+            find_shot(release, episode_number, scene_number, shot_number)
+        except KeyframePlanError as error:
+            raise HTTPException(409, str(error)) from None
+        video_keyframe = db.scalar(
+            select(KeyframeCandidate).where(
+                KeyframeCandidate.project_id == project_id,
+                KeyframeCandidate.shot_plan_release_id == release.id,
+                KeyframeCandidate.episode_number == episode_number,
+                KeyframeCandidate.scene_number == scene_number,
+                KeyframeCandidate.shot_number == shot_number,
+                KeyframeCandidate.status == "accepted",
+            )
+        )
+        required_refs = {
+            release.id,
+            release.job_id,
+            release.script_release_id,
+            release.character_job_id,
+            release.art_job_id,
+        }
+        if (
+            not video_keyframe
+            or data.scope.get("shot_plan_release_id") != release.id
+            or data.scope.get("keyframe_candidate_id") != video_keyframe.id
+            or not required_refs.issubset(set(data.input_refs))
+            or video_keyframe.id not in data.input_refs
+        ):
+            raise HTTPException(409, "video_shot_inputs_changed_or_keyframe_not_accepted")
+        if set(data.parameters) - {"seconds", "size"}:
+            raise HTTPException(422, "unsupported_video_generation_parameters")
+        if data.parameters.get("seconds") not in {4, 6, 8, 12}:
+            raise HTTPException(422, "unsupported_video_duration")
+        if data.parameters.get("size") not in {"1280x720", "720x1280", "1024x1024"}:
+            raise HTTPException(422, "unsupported_video_size")
     if data.stage_key in {"characters", "art"} and project.creation_mode == "original":
         try:
             branch, outline_release, _ = current_adaptation_outline_context(db, project)
@@ -291,6 +338,11 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         data.modality == "image"
         and data.stage_key == "keyframes"
         and profile.adapter_id == "openai-compatible-image"
+    )
+    supported = supported or (
+        data.modality == "video"
+        and data.stage_key == "video"
+        and profile.adapter_id == "openai-compatible-video"
     )
     if not supported:
         job = GenerationJob(
@@ -359,7 +411,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         elif not parsed.path.rstrip("/").endswith("/v1"):
             completion_url = f"{completion_url}/v1"
         completion_url = f"{completion_url}/chat/completions"
-    target_url = profile.endpoint if data.modality == "image" else completion_url
+    target_url = profile.endpoint if data.modality in {"image", "video"} else completion_url
     target_ips = validate_provider_target(target_url, profile.transport)
     job = GenerationJob(
         project_id=project_id,
@@ -407,6 +459,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         raise HTTPException(409, "generation_job_conflict") from None
     try:
         image_result = None
+        video_task = None
         if data.modality == "image":
             image_result = generate_image(
                 endpoint=profile.endpoint,
@@ -419,6 +472,28 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             )
             _, _, usage = image_result
             content = ""
+        elif data.modality == "video":
+            if not video_keyframe:
+                raise HTTPException(409, "accepted_keyframe_required")
+            reference_path = (settings.storage_dir / video_keyframe.storage_key).resolve()
+            if (
+                settings.storage_dir.resolve() not in reference_path.parents
+                or not reference_path.is_file()
+            ):
+                raise HTTPException(409, "accepted_keyframe_file_missing")
+            video_task = submit_video(
+                endpoint=profile.endpoint,
+                target_ip=target_ips[0],
+                model_id=profile.model_id,
+                secret=secret,
+                prompt=data.prompt,
+                input_reference=reference_path.read_bytes(),
+                input_content_type=video_keyframe.content_type,
+                seconds=int(data.parameters["seconds"]),
+                size=str(data.parameters["size"]),
+            )
+            content = ""
+            usage = {}
         else:
             content, usage = complete_chat(
                 endpoint=completion_url,
@@ -765,11 +840,48 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "sha256": keyframe_candidate.sha256,
             }
         )
+    video_candidate = None
+    if video_task and video_keyframe:
+        release = current_shot_plan_release(db, project)
+        scope = job.input_snapshot.get("scope") or {}
+        video_candidate = VideoCandidate(
+            project_id=project_id,
+            branch_id=release.branch_id,
+            shot_plan_release_id=release.id,
+            keyframe_candidate_id=video_keyframe.id,
+            job_id=job.id,
+            provider_task_id=video_task.task_id,
+            episode_number=scope["episode_number"],
+            scene_number=scope["scene_number"],
+            shot_number=scope["shot_number"],
+            requested_seconds=int(job.input_snapshot["parameters"]["seconds"]),
+            progress=video_task.progress,
+            prompt=job.input_snapshot["prompt"],
+            provider_snapshot=job.provider_snapshot,
+            status=(
+                "processing"
+                if stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+                else "stale"
+            ),
+        )
+        db.add(video_candidate)
+        db.flush()
+        content = json.dumps(
+            {
+                "video_candidate_id": video_candidate.id,
+                "provider_task_id": video_task.task_id,
+                "status": video_task.status,
+                "progress": video_task.progress,
+                "keyframe_candidate_id": video_keyframe.id,
+            }
+        )
     output = GenerationOutput(
         project_id=project_id,
         job_id=job.id,
         content_type="application/json"
-        if data.stage_key in {"novelDraft", "continuity"}
+        if data.stage_key in {"novelDraft", "continuity", "video"}
         or (data.stage_key == "source" and project.creation_mode == "original")
         or (data.stage_key == "outline" and project.creation_mode == "original")
         or (data.stage_key == "script" and project.creation_mode == "original")
@@ -794,25 +906,165 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             {"stage_key": data.stage_key, "output_id": output.id},
         )
     else:
-        job.status = "succeeded"
-        stage.status = "needs_review"
-        stage.version += 1
-        stage.stale = False
-        stage.decision = {"candidate_job_id": job.id}
-        audit(db, project_id, "job.succeeded", job.id, {"output_id": output.id, "usage": usage})
-        audit(
-            db,
-            project_id,
-            "stage.candidate_created",
-            stage.id,
-            {"stage_key": stage.stage_key, "job_id": job.id, "output_id": output.id},
-        )
+        if video_candidate:
+            stage.decision = {"candidate_job_id": job.id, "video_candidate_id": video_candidate.id}
+            audit(
+                db,
+                project_id,
+                "video.task_submitted",
+                video_candidate.id,
+                {
+                    "job_id": job.id,
+                    "provider_task_id": video_task.task_id,
+                },
+            )
+        else:
+            job.status = "succeeded"
+            stage.status = "needs_review"
+            stage.version += 1
+            stage.stale = False
+            stage.decision = {"candidate_job_id": job.id}
+            audit(db, project_id, "job.succeeded", job.id, {"output_id": output.id, "usage": usage})
+            audit(
+                db,
+                project_id,
+                "stage.candidate_created",
+                stage.id,
+                {"stage_key": stage.stage_key, "job_id": job.id, "output_id": output.id},
+            )
     db.commit()
     return {
         "id": job.id,
         "status": job.status,
         "output": safe_generation_output(output),
         "provider_snapshot": job.provider_snapshot,
+    }
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/refresh")
+def refresh_video_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    job = db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.id == job_id,
+            GenerationJob.project_id == project_id,
+            GenerationJob.stage_key == "video",
+        )
+    )
+    if not job:
+        raise HTTPException(404, "video_job_not_found")
+    candidate = db.scalar(select(VideoCandidate).where(VideoCandidate.job_id == job.id))
+    if not candidate:
+        raise HTTPException(409, "video_candidate_not_registered")
+    if job.status != "running" or candidate.status not in {"queued", "processing"}:
+        return _video_job_result(job, candidate)
+    stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project_id, StageState.stage_key == "video"
+        )
+    )
+    if (
+        not stage
+        or stage.status != "running"
+        or stage.version != job.input_snapshot.get("stage_version")
+    ):
+        job.status = "stale"
+        candidate.status = "stale"
+        audit(db, project_id, "video.result_stale", candidate.id, {"job_id": job.id})
+        db.commit()
+        return _video_job_result(job, candidate)
+    profile = db.get(ServiceProfile, job.provider_snapshot.get("profile_id"))
+    if (
+        not profile
+        or profile.project_id != project_id
+        or profile.adapter_id != "openai-compatible-video"
+        or profile.version != job.provider_snapshot.get("profile_version")
+    ):
+        raise HTTPException(409, "video_provider_profile_snapshot_unavailable")
+    secret = resolve_provider_secret(profile.secret_ref)
+    if profile.secret_ref and not secret:
+        raise HTTPException(409, "provider_secret_reference_not_configured")
+    target_ips = validate_provider_target(profile.endpoint, profile.transport)
+    try:
+        task = retrieve_video(
+            endpoint=profile.endpoint,
+            target_ip=target_ips[0],
+            secret=secret,
+            task_id=candidate.provider_task_id,
+        )
+        candidate.progress = task.progress
+        if task.status == "failed":
+            candidate.status = "failed"
+            candidate.error = task.error or {"code": "provider_video_generation_failed"}
+            job.status = "failed"
+            job.error = candidate.error
+            stage.status = "failed"
+            stage.version += 1
+            audit(db, project_id, "video.failed", candidate.id, candidate.error)
+        elif task.status == "completed":
+            video_bytes = download_video(
+                endpoint=profile.endpoint,
+                target_ip=target_ips[0],
+                secret=secret,
+                task_id=candidate.provider_task_id,
+            )
+            relative_key = f"generated/{project_id}/{uuid4()}.mp4"
+            path = settings.storage_dir / relative_key
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(video_bytes)
+            candidate.storage_key = relative_key
+            candidate.content_type = "video/mp4"
+            candidate.size_bytes = len(video_bytes)
+            candidate.sha256 = hashlib.sha256(video_bytes).hexdigest()
+            candidate.status = "needs_review"
+            job.status = "succeeded"
+            output = db.scalar(select(GenerationOutput).where(GenerationOutput.job_id == job.id))
+            if output:
+                output.content = json.dumps(
+                    {
+                        "video_candidate_id": candidate.id,
+                        "provider_task_id": candidate.provider_task_id,
+                        "status": "completed",
+                        "progress": 100,
+                        "media_url": (
+                            f"/api/projects/{project_id}/video-candidates/{candidate.id}/file"
+                        ),
+                        "size_bytes": candidate.size_bytes,
+                        "sha256": candidate.sha256,
+                    }
+                )
+            stage.status = "needs_review"
+            stage.version += 1
+            stage.decision = {"candidate_job_id": job.id, "video_candidate_id": candidate.id}
+            audit(
+                db,
+                project_id,
+                "video.candidate_ready",
+                candidate.id,
+                {
+                    "job_id": job.id,
+                    "sha256": candidate.sha256,
+                    "size_bytes": candidate.size_bytes,
+                },
+            )
+        db.commit()
+    except ProviderExecutionError as error:
+        db.rollback()
+        raise HTTPException(error.http_status, error.code) from None
+    return _video_job_result(job, candidate)
+
+
+def _video_job_result(job: GenerationJob, candidate: VideoCandidate) -> dict:
+    return {
+        "id": job.id,
+        "status": job.status,
+        "error": job.error,
+        "video_candidate": {
+            "id": candidate.id,
+            "status": candidate.status,
+            "progress": candidate.progress,
+            "error": candidate.error,
+        },
     }
 
 

@@ -13,6 +13,7 @@ import type {
   CreativeBriefSaveInput,
   GenerationJobSummary,
   KeyframeCandidate,
+  VideoCandidate,
   ManuscriptRelease,
   Project,
   ProjectCreateInput,
@@ -115,6 +116,10 @@ export const api = {
     request<KeyframeCandidate[]>(`/projects/${projectId}/keyframe-candidates`),
   keyframeFileUrl: (projectId: string, candidateId: string) =>
     `${API_ROOT}/projects/${projectId}/keyframe-candidates/${candidateId}/file`,
+  videoCandidates: (projectId: string) =>
+    request<VideoCandidate[]>(`/projects/${projectId}/video-candidates`),
+  videoFileUrl: (projectId: string, candidateId: string) =>
+    `${API_ROOT}/projects/${projectId}/video-candidates/${candidateId}/file`,
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   job: (projectId: string, jobId: string) =>
     request<GenerationJobSummary>(`/projects/${projectId}/jobs/${jobId}`),
@@ -167,6 +172,35 @@ export const api = {
       `/projects/${projectId}/jobs`,
       { method: 'POST', body: JSON.stringify({ ...body, modality: 'image' }) },
     ),
+  createVideoJob: (
+    projectId: string,
+    body: {
+      stage_key: string;
+      profile_id: string;
+      idempotency_key: string;
+      prompt: string;
+      parameters: Record<string, unknown>;
+      input_refs: string[];
+      scope: Record<string, string | number>;
+      data_authorized: boolean;
+    },
+  ) =>
+    request<{ id: string; status: string; error?: Record<string, unknown> }>(
+      `/projects/${projectId}/jobs`,
+      { method: 'POST', body: JSON.stringify({ ...body, modality: 'video' }) },
+    ),
+  refreshVideoJob: (projectId: string, jobId: string) =>
+    request<{
+      id: string;
+      status: string;
+      error: Record<string, unknown>;
+      video_candidate: {
+        id: string;
+        status: string;
+        progress: number;
+        error: Record<string, unknown>;
+      };
+    }>(`/projects/${projectId}/jobs/${jobId}/refresh`, { method: 'POST' }),
   updateJobOutput: (projectId: string, jobId: string, content: string, revision: number) =>
     request<{
       id: string;

@@ -20,6 +20,7 @@ from ..domain.models import (
     ScriptRelease,
     ShotPlanRelease,
     StageState,
+    VideoCandidate,
 )
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
@@ -79,7 +80,10 @@ def decide_stage(
         raise HTTPException(422, "creative_brief_cannot_be_waived")
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
-    if stage_key in {"source", "outline", "shotDesign", "keyframes"} and data.action == "waive":
+    if (
+        stage_key in {"source", "outline", "shotDesign", "keyframes", "video"}
+        and data.action == "waive"
+    ):
         raise HTTPException(422, "source_and_adaptation_outline_cannot_be_waived")
     if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
         raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
@@ -323,6 +327,31 @@ def decide_stage(
             raise HTTPException(409, str(error)) from None
         if keyframe_candidate.shot_plan_release_id != release.id:
             raise HTTPException(409, "keyframe_candidate_shot_plan_stale")
+    video_candidate = None
+    if stage_key == "video" and project.creation_mode == "original":
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        video_candidate = db.scalar(
+            select(VideoCandidate).where(
+                VideoCandidate.project_id == project_id,
+                VideoCandidate.job_id == candidate_job_id,
+                VideoCandidate.status == "needs_review",
+            )
+        )
+        if not video_candidate:
+            raise HTTPException(409, "video_candidate_missing_or_not_ready")
+        try:
+            release = current_shot_plan_release(db, project)
+        except KeyframePlanError as error:
+            raise HTTPException(409, str(error)) from None
+        accepted_keyframe = db.scalar(
+            select(KeyframeCandidate.id).where(
+                KeyframeCandidate.id == video_candidate.keyframe_candidate_id,
+                KeyframeCandidate.status == "accepted",
+                KeyframeCandidate.shot_plan_release_id == release.id,
+            )
+        )
+        if video_candidate.shot_plan_release_id != release.id or not accepted_keyframe:
+            raise HTTPException(409, "video_candidate_upstream_keyframe_is_stale")
     if (
         stage_key in {"characters", "art"}
         and data.action == "accept"
@@ -781,6 +810,53 @@ def decide_stage(
             keyframe_candidate.id,
             stage.decision,
         )
+    elif stage_key == "video" and video_candidate:
+        if data.action == "accept":
+            previous = db.scalars(
+                select(VideoCandidate).where(
+                    VideoCandidate.project_id == project_id,
+                    VideoCandidate.shot_plan_release_id == video_candidate.shot_plan_release_id,
+                    VideoCandidate.episode_number == video_candidate.episode_number,
+                    VideoCandidate.scene_number == video_candidate.scene_number,
+                    VideoCandidate.shot_number == video_candidate.shot_number,
+                    VideoCandidate.status == "accepted",
+                )
+            ).all()
+            for item in previous:
+                item.status = "superseded"
+        video_candidate.status = "accepted" if data.action == "accept" else "rejected"
+        db.flush()
+        accepted_rows = db.scalars(
+            select(VideoCandidate).where(
+                VideoCandidate.project_id == project_id,
+                VideoCandidate.shot_plan_release_id == video_candidate.shot_plan_release_id,
+                VideoCandidate.status == "accepted",
+            )
+        ).all()
+        accepted_shots = {
+            (item.episode_number, item.scene_number, item.shot_number) for item in accepted_rows
+        }
+        try:
+            release = current_shot_plan_release(db, project)
+            required = required_shots(release)
+            all_accepted = accepted_shots == required
+        except KeyframePlanError:
+            required = set()
+            all_accepted = False
+        stage.status = "accepted" if all_accepted else "blocked"
+        stage.decision = {
+            "action": data.action,
+            "candidate_job_id": video_candidate.job_id,
+            "video_candidate_id": video_candidate.id,
+            "shot_plan_release_id": video_candidate.shot_plan_release_id,
+            "episode_number": video_candidate.episode_number,
+            "scene_number": video_candidate.scene_number,
+            "shot_number": video_candidate.shot_number,
+            "reason": data.reason,
+            "accepted_shot_count": len(accepted_shots),
+            "required_shot_count": len(required),
+        }
+        audit(db, project_id, f"video.{video_candidate.status}", video_candidate.id, stage.decision)
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"

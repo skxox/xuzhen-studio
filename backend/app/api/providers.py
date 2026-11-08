@@ -107,8 +107,10 @@ def test_service_profile(
     if not profile or profile.project_id != project_id:
         raise HTTPException(404, "service_profile_not_found")
     supported_profile = (
-        profile.modality == "text" and profile.adapter_id == "openai-compatible-chat"
-    ) or (profile.modality == "image" and profile.adapter_id == "openai-compatible-image")
+        (profile.modality == "text" and profile.adapter_id == "openai-compatible-chat")
+        or (profile.modality == "image" and profile.adapter_id == "openai-compatible-image")
+        or (profile.modality == "video" and profile.adapter_id == "openai-compatible-video")
+    )
     if not supported_profile:
         raise HTTPException(409, "connection_test_not_supported_for_adapter")
 

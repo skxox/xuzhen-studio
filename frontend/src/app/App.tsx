@@ -78,6 +78,11 @@ const OriginalKeyframesWorkspace = lazy(() =>
     default: page,
   })),
 );
+const OriginalVideoWorkspace = lazy(() =>
+  import('../pages/OriginalVideoWorkspace').then(({ OriginalVideoWorkspace: page }) => ({
+    default: page,
+  })),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -407,9 +412,11 @@ function AppShell() {
                   ? '镜头设计'
                   : location.pathname === '/writing/keyframes'
                     ? '关键帧审阅'
-                    : location.pathname === '/writing/characters'
-                      ? '文学角色圣经'
-                      : '故事与剧本'
+                    : location.pathname === '/writing/video'
+                      ? '逐镜视频审片'
+                      : location.pathname === '/writing/characters'
+                        ? '文学角色圣经'
+                        : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -488,6 +495,10 @@ function AppShell() {
               <Route
                 path="/writing/keyframes"
                 element={<OriginalKeyframesWorkspace key={project?.id} project={project} />}
+              />
+              <Route
+                path="/writing/video"
+                element={<OriginalVideoWorkspace key={project?.id} project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

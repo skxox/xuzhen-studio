@@ -201,6 +201,37 @@ export interface KeyframeCandidate {
   file_url: string;
 }
 
+export interface VideoCandidate {
+  id: string;
+  branch_id: string;
+  shot_plan_release_id: string;
+  keyframe_candidate_id: string;
+  job_id: string;
+  provider_task_id: string;
+  episode_number: number;
+  scene_number: number;
+  shot_number: number;
+  requested_seconds: number;
+  progress: number;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  prompt: string;
+  provider_snapshot: Record<string, unknown>;
+  error: Record<string, unknown>;
+  status:
+    | 'queued'
+    | 'processing'
+    | 'needs_review'
+    | 'accepted'
+    | 'rejected'
+    | 'superseded'
+    | 'failed'
+    | 'stale';
+  created_at: string;
+  file_url?: string | null;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

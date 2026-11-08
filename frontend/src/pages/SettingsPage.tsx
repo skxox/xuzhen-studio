@@ -28,9 +28,11 @@ export function SettingsPage({ project }: { project?: Project }) {
         ? 'openai-compatible-chat'
         : next === 'image'
           ? 'openai-compatible-image'
-          : next === 'audio'
-            ? 'openai-compatible-audio'
-            : 'custom',
+          : next === 'video'
+            ? 'openai-compatible-video'
+            : next === 'audio'
+              ? 'openai-compatible-audio'
+              : 'custom',
     );
   };
   const profiles = useQuery({
@@ -83,7 +85,8 @@ export function SettingsPage({ project }: { project?: Project }) {
         <span>
           <b>安全边界：</b>真实 API Key 不进入浏览器或数据库；请在后端环境变量{' '}
           <code>XZ_PROVIDER_SECRETS</code> 中配置密钥引用。当前已接入 OpenAI 兼容文本生成和 OpenAI
-          兼容图片生成；视频和语音档案仍需对应 Adapter 后才能执行。
+          兼容图片生成；视频接入 OpenAI-compatible `/v1/videos` 异步任务子集，语音档案仍需对应
+          Adapter。
         </span>
       </div>
       <div className="settings-layout">
@@ -134,6 +137,7 @@ export function SettingsPage({ project }: { project?: Project }) {
                 <SelectInput value={adapter} onChange={(event) => setAdapter(event.target.value)}>
                   <option value="openai-compatible-chat">OpenAI-compatible Chat</option>
                   <option value="openai-compatible-image">OpenAI-compatible Image</option>
+                  <option value="openai-compatible-video">OpenAI-compatible Video</option>
                   <option value="openai-compatible-audio">OpenAI-compatible Audio</option>
                   <option value="comfyui">ComfyUI</option>
                   <option value="custom">已注册的自定义 Adapter</option>
@@ -155,7 +159,9 @@ export function SettingsPage({ project }: { project?: Project }) {
               hint={
                 modality === 'image' && adapter === 'openai-compatible-image'
                   ? '填写 OpenAI 兼容 API 根地址（如 /v1）；需提供 /images/generations 与 /models，图片响应需含 b64_json。远程 HTTPS，本机 HTTP 仅允许 loopback。'
-                  : '填写 API 根地址；远程服务要求 HTTPS，本机 HTTP 仅允许 loopback。'
+                  : modality === 'video' && adapter === 'openai-compatible-video'
+                    ? '填写支持异步 /v1/videos、/v1/videos/{id} 与 /content 的 API 根地址；视频能力以服务商实际兼容范围为准。'
+                    : '填写 API 根地址；远程服务要求 HTTPS，本机 HTTP 仅允许 loopback。'
               }
             >
               <TextInput
@@ -280,7 +286,8 @@ function ProfileRow({ projectId, profile }: { projectId: string; profile: Servic
   const connected = profile.connection_test?.status === 'connected';
   const supported =
     (profile.modality === 'text' && profile.adapter_id === 'openai-compatible-chat') ||
-    (profile.modality === 'image' && profile.adapter_id === 'openai-compatible-image');
+    (profile.modality === 'image' && profile.adapter_id === 'openai-compatible-image') ||
+    (profile.modality === 'video' && profile.adapter_id === 'openai-compatible-video');
   return (
     <div className="profile-row">
       <span className="profile-row__icon">

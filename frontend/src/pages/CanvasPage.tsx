@@ -49,7 +49,7 @@ const stageRoutes: Record<string, string> = {
   script: '/writing',
   shotDesign: '/writing/storyboard',
   keyframes: '/writing/keyframes',
-  video: '/storyboard',
+  video: '/writing/video',
   post: '/delivery',
   delivery: '/delivery',
 };

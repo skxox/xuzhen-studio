@@ -188,14 +188,6 @@
   color: var(--ink-soft);
   text-align: left;
   font-size: 10px;
-  cursor: pointer;
-}
-.episode-row:hover {
-  background: var(--surface-hover);
-}
-.episode-row.is-selected {
-  background: var(--surface-raised);
-  color: var(--accent);
 }
 .episode-row small {
   margin-left: auto;
@@ -212,11 +204,6 @@
   color: var(--subtle);
   font-size: 7px;
 }
-.episode-row:nth-of-type(2) .episode-dot,
-.episode-row:nth-of-type(3) .episode-dot {
-  border-color: color-mix(in srgb, var(--green) 40%, transparent);
-  color: var(--green);
-}
 .episode-more {
   display: flex;
   align-items: center;
@@ -227,6 +214,7 @@
   color: var(--subtle);
   font-size: 9px;
   cursor: pointer;
+  text-decoration: none;
 }
 .sidebar-bottom {
   margin-top: auto;

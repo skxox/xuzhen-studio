@@ -2,6 +2,60 @@
 .overview-page .page-heading {
   margin-bottom: 24px;
 }
+.overview-empty {
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.writing-project-panel,
+.writing-next-step {
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.writing-project-panel__heading,
+.writing-next-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.writing-project-panel__heading {
+  margin-bottom: 18px;
+}
+.writing-project-panel__heading h2,
+.writing-next-step h2 {
+  margin: 5px 0 0;
+  font-size: 16px;
+}
+.writing-next-step p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.writing-next-step .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.writing-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.writing-state--error {
+  color: var(--danger);
+}
+.writing-state .spin {
+  animation: writing-spin 1s linear infinite;
+}
+@keyframes writing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .demo-banner,
 .project-banner {
   display: flex;
@@ -321,6 +375,8 @@
   gap: 9px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
 }
 .review-thumb {
   display: grid;
@@ -363,7 +419,7 @@
   color: var(--muted);
   font-size: 9px;
 }
-.review-row > button {
+.review-row__action {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -371,7 +427,6 @@
   background: transparent;
   color: var(--accent);
   font-size: 9px;
-  cursor: pointer;
 }
 .review-all {
   display: inline-flex;
@@ -390,10 +445,17 @@
   gap: 12px;
 }
 .project-card {
+  display: block;
+  width: 100%;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   transition:
     transform var(--motion-fast),
     border-color var(--motion-fast);

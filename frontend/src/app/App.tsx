@@ -1,12 +1,11 @@
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
+  ArrowUpRight,
   BookOpen,
-  Check,
   ChevronDown,
   Clapperboard,
-  Clock3,
   Film,
   FolderOpen,
   GalleryVerticalEnd,
@@ -31,7 +30,6 @@ import { DeliveryPage } from '../pages/DeliveryPage';
 import { OverviewPage } from '../pages/OverviewPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { SourcePage } from '../pages/SourcePage';
-import { StoryboardPage } from '../pages/StoryboardPage';
 import { WritingPage } from '../pages/WritingPage';
 import '../styles/workspace.css';
 
@@ -93,7 +91,7 @@ const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
   { to: '/source', label: '小说与创意', icon: BookOpen },
   { to: '/writing', label: '故事与剧本', icon: Clapperboard },
-  { to: '/storyboard', label: '分镜工作台', icon: GalleryVerticalEnd },
+  { to: '/writing/storyboard', label: '分镜工作台', icon: GalleryVerticalEnd },
   { to: '/canvas', label: '生成流程', icon: Workflow },
   { to: '/assets', label: '素材资产', icon: Library },
   { to: '/delivery', label: '审片交付', icon: Film },
@@ -158,7 +156,7 @@ function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => 
             autoFocus
             required
             maxLength={200}
-            placeholder="例如：南汀岛的十一分钟"
+            placeholder="输入项目名称"
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
@@ -303,8 +301,6 @@ function ProjectPickerDialog({
 }
 
 function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProject: () => void }) {
-  const location = useLocation();
-  const isStoryboard = location.pathname === '/storyboard';
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
@@ -316,10 +312,10 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
         <ChevronDown className="brand-chevron" size={14} />
       </div>
       <button className="project-select" onClick={onSelectProject}>
-        <span className="project-select__avatar">{project?.name?.slice(0, 1) ?? '南'}</span>
+        <span className="project-select__avatar">{project?.name?.slice(0, 1) ?? '帧'}</span>
         <span className="project-select__copy">
-          <b>{project?.name ?? '南汀岛的十一分钟'}</b>
-          <small>{project ? modeLabel(project.creation_mode) : '演示小说改编'} · 第 1 季</small>
+          <b>{project?.name ?? '未选择项目'}</b>
+          <small>{project ? modeLabel(project.creation_mode) : '选择或创建项目'}</small>
         </span>
         <ChevronDown size={15} />
       </button>
@@ -329,35 +325,37 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={to === '/' || to === '/writing'}
             className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}
           >
             <Icon size={17} strokeWidth={1.8} />
             <span>{label}</span>
-            {to === '/storyboard' && <i className="nav-current-dot" />}
           </NavLink>
         ))}
       </nav>
       <div className="episode-list">
         <div className="nav-caption episode-caption">
-          <span>本季分集</span>
-          <button aria-label="新增分集">
-            <Plus size={14} />
-          </button>
+          <span>项目范围</span>
         </div>
-        {Array.from({ length: 8 }, (_, index) => (
-          <button
-            key={index}
-            className={`episode-row ${isStoryboard && index === 3 ? 'is-selected' : ''}`}
+        <div className="episode-row" aria-label="项目制作范围">
+          <span className="episode-dot">{project?.target_episodes ?? '—'}</span>
+          <span>{project?.creation_mode === 'commercial' ? '商品短片' : '目标集数'}</span>
+          <small>
+            {project
+              ? project.creation_mode === 'commercial'
+                ? '单片制作'
+                : `${project.episode_seconds ?? '—'} 秒 / 集`
+              : '未选择项目'}
+          </small>
+        </div>
+        {project && (
+          <Link
+            className="episode-more"
+            to={project.creation_mode === 'original' ? '/writing/chapters' : '/writing'}
           >
-            <span className="episode-dot">{index < 2 ? <Check size={10} /> : `0${index + 1}`}</span>
-            <span>E01-{String(index + 1).padStart(2, '0')}</span>
-            <small>{index < 2 ? '已验收' : `${3 + (index % 3)} 镜`}</small>
-          </button>
-        ))}
-        <button className="episode-more">
-          查看全部 18 集 <ChevronDown size={13} />
-        </button>
+            打开创作阶段 <ArrowUpRight size={13} />
+          </Link>
+        )}
       </div>
       <div className="sidebar-bottom">
         <NavLink
@@ -371,7 +369,7 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
           <div className="user-avatar">M</div>
           <div>
             <b>本地工作区</b>
-            <small>{project ? 'API 项目空间' : '仅演示数据'}</small>
+            <small>{project ? 'API 项目空间' : '未选择项目'}</small>
           </div>
           <SlidersHorizontal size={15} />
         </div>
@@ -395,6 +393,10 @@ function AppShell() {
   });
   const projects = projectsQuery.data ?? [];
   const project = projects.find((item) => item.id === activeProjectId) ?? projects[0];
+  const selectProject = (selected: Project) => {
+    setActiveProjectId(selected.id);
+    localStorage.setItem('xuzhen.active-project', selected.id);
+  };
   const pageTitles = useMemo(
     () => Object.fromEntries(sections.map(({ to, label }) => [to, label])),
     [],
@@ -435,19 +437,18 @@ function AppShell() {
           <div className="breadcrumb">
             <span>制作空间</span>
             <span className="breadcrumb-sep">/</span>
-            <b>{project?.name ?? '南汀岛的十一分钟'}</b>
+            <b>{project?.name ?? '未选择项目'}</b>
             <span className="breadcrumb-sep">/</span>
             <strong>{title}</strong>
           </div>
           <div className="topbar-tools">
-            <Badge tone={healthQuery.isSuccess ? 'green' : 'neutral'} dot>
-              {healthQuery.isSuccess ? 'API 已连接' : '演示工作区'}
+            <Badge
+              tone={healthQuery.isSuccess ? 'green' : healthQuery.isError ? 'gold' : 'neutral'}
+              dot
+            >
+              {healthQuery.isSuccess ? 'API 已连接' : healthQuery.isError ? 'API 未连接' : '连接中'}
             </Badge>
             <span className="topbar-divider" />
-            <button className="quiet-action">
-              <Clock3 size={15} />
-              最近保存于 2 分钟前
-            </button>
             <ThemeToggle />
             <Button
               variant="primary"
@@ -464,7 +465,13 @@ function AppShell() {
             <Routes>
               <Route
                 path="/"
-                element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />}
+                element={
+                  <OverviewPage
+                    project={project}
+                    onCreate={() => setCreateOpen(true)}
+                    onSelectProject={selectProject}
+                  />
+                }
               />
               <Route
                 path="/source"
@@ -511,14 +518,20 @@ function AppShell() {
                 path="/writing/voice"
                 element={<OriginalVoiceWorkspace key={project?.id} project={project} />}
               />
-              <Route path="/storyboard" element={<StoryboardPage />} />
+              <Route path="/storyboard" element={<Navigate to="/writing/storyboard" replace />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />
               <Route path="/assets" element={<AssetsPage project={project} />} />
               <Route path="/delivery" element={<DeliveryPage project={project} />} />
               <Route path="/settings" element={<SettingsPage project={project} />} />
               <Route
                 path="*"
-                element={<OverviewPage project={project} onCreate={() => setCreateOpen(true)} />}
+                element={
+                  <OverviewPage
+                    project={project}
+                    onCreate={() => setCreateOpen(true)}
+                    onSelectProject={selectProject}
+                  />
+                }
               />
             </Routes>
           </Suspense>
@@ -531,8 +544,7 @@ function AppShell() {
         activeId={project?.id}
         onClose={() => setProjectPickerOpen(false)}
         onSelect={(selected) => {
-          setActiveProjectId(selected.id);
-          localStorage.setItem('xuzhen.active-project', selected.id);
+          selectProject(selected);
           setProjectPickerOpen(false);
         }}
         onCreate={() => setCreateOpen(true)}

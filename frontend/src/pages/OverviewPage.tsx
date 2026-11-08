@@ -4,20 +4,59 @@ import {
   BookOpen,
   Check,
   Clock3,
-  Film,
   FolderOpen,
   Plus,
   Sparkles,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { Project } from '../lib/types';
+import type { Project, StageState } from '../lib/types';
+import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { PageHeading, Panel } from '../components/ui/Panel';
 import { ProductionStages } from '../components/workspace/ProductionStages';
+import { stageRoute } from '../components/workspace/stageRoutes';
 
-export function OverviewPage({ project, onCreate }: { project?: Project; onCreate: () => void }) {
+type Props = {
+  project?: Project;
+  onCreate: () => void;
+  onSelectProject: (project: Project) => void;
+};
+
+export function OverviewPage({ project, onCreate, onSelectProject }: Props) {
+  const projectId = project?.id;
+  const stagesQuery = useQuery({
+    queryKey: ['stages', projectId],
+    queryFn: () => api.stages(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const jobsQuery = useQuery({
+    queryKey: ['jobs', projectId],
+    queryFn: () => api.jobs(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.projects });
+  const stages = stagesQuery.data ?? [];
+  const jobs = jobsQuery.data ?? [];
+  const projects = projectsQuery.data ?? [];
+  const completedStages = stages.filter((stage) =>
+    ['accepted', 'waived'].includes(stage.status),
+  ).length;
+  const progress = stages.length ? Math.round((completedStages / stages.length) * 100) : 0;
+  const reviewStages = stages.filter((stage) =>
+    ['needs_review', 'failed', 'blocked', 'stale'].includes(stage.status),
+  );
+  const currentStage = stages.find((stage) =>
+    ['running', 'needs_review', 'ready', 'failed', 'blocked', 'stale'].includes(stage.status),
+  );
+  const latestJob = jobs[0];
+  const recentJobs = jobs;
+  const modalityCount = new Set(recentJobs.map((job) => job.modality)).size;
+  const projectStatus = getProjectStatus(stages);
+  const waiting = stagesQuery.isLoading || jobsQuery.isLoading;
+
   return (
     <div className="overview-page">
       <PageHeading
@@ -37,7 +76,7 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
           </span>
           <div>
             <b>欢迎来到叙帧工作台</b>
-            <p>当前展示的是本地演示工作区。创建项目后，项目与原文将保存到已连接的 API。</p>
+            <p>创建项目后，项目内容和阶段进度会保存到已连接的 API。</p>
           </div>
           <Button size="sm" onClick={onCreate}>
             创建第一个项目 <ArrowRight size={14} />
@@ -48,18 +87,13 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
         <div className="project-banner">
           <div className="project-monogram">{project.name.slice(0, 1)}</div>
           <div>
-            <Badge tone="green" dot>
-              制作中
+            <Badge tone={projectStatus === '待审' ? 'gold' : 'green'} dot>
+              {projectStatus}
             </Badge>
             <h2>{project.name}</h2>
             <p>
-              {project.genre || '未设题材'} <span>·</span> {project.target_episodes || 12} 集{' '}
-              <span>·</span>{' '}
-              {project.creation_mode === 'original'
-                ? '原创小说'
-                : project.creation_mode === 'commercial'
-                  ? '商品短片'
-                  : '小说改编'}
+              {project.genre || '未设题材'} <span>·</span> {project.target_episodes || '集数待定'}{' '}
+              集 <span>·</span> {modeLabel(project)}
             </p>
           </div>
           <Link className="banner-link" to="/source">
@@ -70,75 +104,99 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
       <section className="overview-stats" aria-label="项目制作概况">
         <StatCard
           label="制作进度"
-          value="42%"
-          detail="3 / 8 阶段已验收"
+          value={project ? (waiting ? '…' : `${progress}%`) : '—'}
+          detail={project ? `${completedStages} / ${stages.length} 阶段已验收` : '选择或创建项目'}
           icon={<Check size={17} />}
           tone="gold"
-          progress={42}
+          progress={project ? progress : undefined}
         />
         <StatCard
-          label="待审候选"
-          value="12"
-          detail="4 个镜头 · 8 张关键帧"
+          label="待处理阶段"
+          value={project ? (stagesQuery.isLoading ? '…' : String(reviewStages.length)) : '—'}
+          detail={project ? '待审、失败、阻塞或待返工' : '阶段验收会显示在这里'}
           icon={<FolderOpen size={17} />}
           tone="violet"
         />
         <StatCard
-          label="本周生成"
-          value="38"
-          detail="跨 3 类模型服务"
+          label="最近生成任务"
+          value={project ? (jobsQuery.isLoading ? '…' : String(recentJobs.length)) : '—'}
+          detail={
+            project ? `最近 20 条记录 · ${modalityCount} 类模型能力` : '文本、图片、视频和语音任务'
+          }
           icon={<Sparkles size={17} />}
           tone="blue"
         />
         <StatCard
-          label="最近活动"
-          value="14:32"
-          detail="分镜版本 v03 已保存"
+          label="最近生成活动"
+          value={latestJob ? formatRelativeTime(latestJob.created_at) : project ? '暂无' : '—'}
+          detail={
+            latestJob
+              ? `${stageLabel(latestJob.stage_key)} · ${jobStatusLabel(latestJob.status)}`
+              : '还没有生成任务'
+          }
           icon={<Clock3 size={17} />}
           tone="green"
         />
       </section>
+      {project && (stagesQuery.isError || jobsQuery.isError) && (
+        <p className="form-error">
+          {stagesQuery.isError && `阶段读取失败：${stagesQuery.error.message} `}
+          {jobsQuery.isError && `生成任务读取失败：${jobsQuery.error.message}`}
+        </p>
+      )}
       <div className="overview-grid">
         <Panel className="overview-production">
           <div className="panel-heading">
             <div>
               <div className="eyebrow">ACTIVE PRODUCTION</div>
-              <h3>本集制作路径</h3>
-              <p>每一步都可审阅、返工或带着风险说明豁免。</p>
+              <h3>项目阶段路径</h3>
+              <p>阶段状态来自当前项目；审核、失败和阻塞项会显示在右侧队列。</p>
             </div>
-            <button className="plain-icon" aria-label="制作阶段选项">
+            <Link className="plain-icon" aria-label="打开生成流程画布" to="/canvas">
               <ArrowUpRight size={17} />
-            </button>
+            </Link>
           </div>
-          <div className="episode-feature">
-            <div className="episode-art">
-              <div className="episode-art__sun" />
-              <div className="episode-art__window" />
-              <div className="episode-art__person" />
-              <span>01:24</span>
-            </div>
-            <div className="episode-feature__copy">
-              <Badge tone="gold">EPISODE 04</Badge>
-              <h2>空白的十一分钟</h2>
-              <p>剧本 v04 已确认；分镜正在核对电台方位与时间线。</p>
-              <div className="episode-meta">
-                <span>
-                  <Film size={14} /> 4 个镜头
-                </span>
-                <span>
-                  <Clock3 size={14} /> 预计 42 秒
-                </span>
+          {project && stagesQuery.isError ? (
+            <p className="form-error">无法载入项目阶段：{stagesQuery.error.message}</p>
+          ) : project && stages.length ? (
+            <>
+              <div className="episode-feature">
+                <div className="episode-art episode-art--status">
+                  <span>{currentStage ? stageStatusLabel(currentStage.status) : '已完成'}</span>
+                </div>
+                <div className="episode-feature__copy">
+                  <Badge tone={currentStage?.status === 'needs_review' ? 'gold' : 'green'}>
+                    {currentStage?.label ?? '所有阶段已验收'}
+                  </Badge>
+                  <h2>{currentStage ? stageStatusLabel(currentStage.status) : '制作流程已完成'}</h2>
+                  <p>{currentStage?.expected_output ?? '当前项目的全部阶段均已验收或豁免。'}</p>
+                  <div className="episode-meta">
+                    <span>
+                      <Check size={14} /> 已验收 {completedStages} / {stages.length} 阶段
+                    </span>
+                    <span>
+                      <Clock3 size={14} />{' '}
+                      {currentStage
+                        ? `第 ${stages.indexOf(currentStage) + 1} / ${stages.length} 阶段`
+                        : '全部完成'}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <ProductionStages />
+              <ProductionStages stages={stages} />
+            </>
+          ) : project ? (
+            <p>{stagesQuery.isLoading ? '正在读取项目阶段…' : '当前项目还没有阶段记录。'}</p>
+          ) : (
+            <p>选择或创建项目后，这里会显示该项目的真实生产阶段和门禁状态。</p>
+          )}
           <div className="panel-footer">
             <span>
               <span className="live-dot" />
-              AI 生成候选，人工决定是否采纳
+              AI 提供候选，人工决定是否采纳
             </span>
-            <Link to="/storyboard">
-              继续分镜 <ArrowRight size={14} />
+            <Link to={currentStage ? stageRoute(currentStage.stage_key) : '/source'}>
+              {currentStage ? `继续${currentStage.label}` : '进入项目'} <ArrowRight size={14} />
             </Link>
           </div>
         </Panel>
@@ -146,35 +204,23 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
           <div className="panel-heading">
             <div>
               <div className="eyebrow">REVIEW QUEUE</div>
-              <h3>等你拍板</h3>
-              <p>优先处理会阻塞下游的决定。</p>
+              <h3>需要处理</h3>
+              <p>按项目当前的阶段状态排列。</p>
             </div>
-            <span className="review-count">03</span>
+            <span className="review-count">{String(reviewStages.length).padStart(2, '0')}</span>
           </div>
-          <ReviewRow
-            type="finding"
-            title="两份潮位记录相差 11 分钟"
-            meta="时间线 finding · 第 6 章 → 第 7 章"
-            action="复核"
-            tone="gold"
-          />
-          <ReviewRow
-            type="frame"
-            title="林澄 · 防风外套造型"
-            meta="关键帧候选 · 3 个版本"
-            action="比较"
-            tone="violet"
-          />
-          <ReviewRow
-            type="script"
-            title="第 4 集剧本结构"
-            meta="分集剧本 · 版本 v02"
-            action="审阅"
-            tone="blue"
-          />
-          <Link className="review-all" to="/storyboard">
-            查看全部待审 <ArrowRight size={14} />
-          </Link>
+          {reviewStages.length ? (
+            reviewStages.slice(0, 4).map((stage) => <ReviewRow key={stage.id} stage={stage} />)
+          ) : (
+            <p className="overview-empty">
+              {project ? '当前没有待审或阻塞阶段。' : '选择项目后显示需要你处理的阶段。'}
+            </p>
+          )}
+          {reviewStages.length > 4 && (
+            <Link className="review-all" to="/canvas">
+              查看其余 {reviewStages.length - 4} 项 <ArrowRight size={14} />
+            </Link>
+          )}
         </Panel>
       </div>
       <section className="recent-projects">
@@ -188,13 +234,26 @@ export function OverviewPage({ project, onCreate }: { project?: Project; onCreat
           </button>
         </div>
         <div className="project-cards">
-          <ProjectCard
-            title={project?.name || '南汀岛的十一分钟'}
-            subtitle="小说改编 · 海岛悬疑"
-            progress={42}
-            hue="umber"
-          />
-          <ProjectCard title="灯塔以北" subtitle="原创小说 · 海岸群像" progress={18} hue="teal" />
+          {projectsQuery.isLoading ? (
+            <p>正在读取项目列表…</p>
+          ) : projectsQuery.isError ? (
+            <p className="form-error">无法载入项目列表：{projectsQuery.error.message}</p>
+          ) : projects.length ? (
+            projects
+              .slice(0, 2)
+              .map((item, index) => (
+                <ProjectCard
+                  key={item.id}
+                  project={item}
+                  active={item.id === project?.id}
+                  progress={item.id === project?.id ? progress : undefined}
+                  hue={index === 0 ? 'umber' : 'teal'}
+                  onSelect={() => onSelectProject(item)}
+                />
+              ))
+          ) : (
+            <p>还没有项目。创建一个项目后即可开始制作。</p>
+          )}
           <button className="project-create-card" onClick={onCreate}>
             <span>
               <Plus size={19} />
@@ -240,70 +299,126 @@ function StatCard({
   );
 }
 
-function ReviewRow({
-  type,
-  title,
-  meta,
-  action,
-  tone,
-}: {
-  type: string;
-  title: string;
-  meta: string;
-  action: string;
-  tone: string;
-}) {
+function ReviewRow({ stage }: { stage: StageState }) {
+  const tone = stage.status === 'needs_review' ? 'gold' : 'violet';
   return (
-    <div className="review-row">
+    <Link className="review-row" to={stageRoute(stage.stage_key)}>
       <div className={`review-thumb review-thumb--${tone}`}>
-        {type === 'finding' ? (
-          <span>!</span>
-        ) : type === 'frame' ? (
-          <span>◈</span>
-        ) : (
-          <BookOpen size={15} />
-        )}
+        {stage.status === 'needs_review' ? <BookOpen size={15} /> : <span>!</span>}
       </div>
       <div className="review-row__copy">
-        <b>{title}</b>
-        <small>{meta}</small>
+        <b>{stage.label}</b>
+        <small>
+          {stageStatusLabel(stage.status)} · {stage.expected_output}
+        </small>
       </div>
-      <button>
-        {action}
-        <ArrowRight size={13} />
-      </button>
-    </div>
+      <span className="review-row__action">
+        {stage.status === 'needs_review' ? '审阅' : '处理'} <ArrowRight size={13} />
+      </span>
+    </Link>
   );
 }
 
 function ProjectCard({
-  title,
-  subtitle,
+  project,
+  active,
   progress,
   hue,
+  onSelect,
 }: {
-  title: string;
-  subtitle: string;
-  progress: number;
+  project: Project;
+  active: boolean;
+  progress?: number;
   hue: string;
+  onSelect: () => void;
 }) {
   return (
-    <Link to="/source" className="project-card">
+    <button type="button" onClick={onSelect} className="project-card">
       <div className={`project-card__art project-card__art--${hue}`}>
         <div />
-        <span>{subtitle.split(' · ')[0]}</span>
+        <span>{active ? '当前项目' : modeLabel(project)}</span>
       </div>
       <div className="project-card__copy">
-        <b>{title}</b>
-        <small>{subtitle}</small>
+        <b>{project.name}</b>
+        <small>{project.genre || modeLabel(project)}</small>
         <div className="project-progress">
-          <span style={{ width: `${progress}%` }} />
+          {progress !== undefined && <span style={{ width: `${progress}%` }} />}
         </div>
         <footer>
-          <span>{progress}% 完成</span>
-          <span>刚刚更新</span>
+          <span>{progress === undefined ? '切换项目' : `${progress}% 完成`}</span>
+          <span>{formatRelativeTime(project.updated_at)}</span>
         </footer>
       </div>
-    </Link>
+    </button>
   );
+}
+
+function modeLabel(project: Project) {
+  if (project.creation_mode === 'original') return '原创小说';
+  if (project.creation_mode === 'commercial') return '商品短片';
+  return '小说改编';
+}
+
+function getProjectStatus(stages: StageState[]) {
+  if (stages.some((stage) => stage.status === 'needs_review')) return '待审';
+  if (stages.some((stage) => stage.status === 'running')) return '生成中';
+  if (stages.length && stages.every((stage) => ['accepted', 'waived'].includes(stage.status)))
+    return '已完成';
+  return '制作中';
+}
+
+function stageLabel(stageKey: string) {
+  const labels: Record<string, string> = {
+    novelDraft: '小说正文',
+    continuity: '连续性审校',
+    manuscriptRelease: '原创稿锁版',
+    outline: '视频改编大纲',
+    script: '分集剧本',
+    shotDesign: '分镜设计',
+    keyframes: '关键帧',
+    video: '逐镜视频',
+    voice: '逐句配音',
+    post: '后期交付包',
+    delivery: '母版交付',
+  };
+  return labels[stageKey] ?? stageKey;
+}
+
+function stageStatusLabel(status: StageState['status']) {
+  const labels: Record<StageState['status'], string> = {
+    not_started: '未开始',
+    ready: '可开始',
+    running: '进行中',
+    needs_review: '等待审阅',
+    accepted: '已验收',
+    waived: '已豁免',
+    blocked: '被阻塞',
+    stale: '需要更新',
+    failed: '执行失败',
+  };
+  return labels[status];
+}
+
+function jobStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    queued: '排队中',
+    running: '生成中',
+    succeeded: '已完成',
+    failed: '失败',
+    stale: '结果过期',
+    needs_review: '待审',
+  };
+  return labels[status] ?? status;
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '时间未知';
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  return `${days} 天前`;
 }

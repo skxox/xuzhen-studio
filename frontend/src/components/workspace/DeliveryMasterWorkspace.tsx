@@ -61,6 +61,8 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
     },
   });
   const error = render.error ?? decide.error ?? mastersQuery.error ?? runtimeQuery.error;
+  const errorDetail = error ? readableError(error) : '';
+  const longDialogue = parseLongDialogueError(errorDetail);
   const supportedMode = project.creation_mode === 'original';
   const ready =
     supportedMode &&
@@ -156,13 +158,15 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
           </div>
         </div>
       )}
-      {error?.message.includes('dialogue_audio_exceeds_subtitle_slot') ? (
+      {longDialogue ? (
         <p className="form-error">
-          有对白音频比对应字幕窗口长超过 20%，已阻止合成以免明显变速或截断。可{' '}
-          <Link to="/writing/voice">重新生成该句配音</Link>，或先修改字幕时间窗再重新生成剪辑包。
+          第 {longDialogue.episode} 集第 {longDialogue.scene} 场第 {longDialogue.dialogue} 句
+          （字幕第 {longDialogue.subtitle} 行）超过字幕时间窗 20% 上限，已阻止合成。可{' '}
+          <Link to="/writing/voice">重新生成该句配音</Link>，或在{' '}
+          <Link to="/delivery">后期字幕编辑</Link>中延长时间窗并生成新剪辑包。
         </p>
       ) : (
-        error && <p className="form-error">{readableError(error)}</p>
+        error && <p className="form-error">{errorDetail}</p>
       )}
       <div className="workspace-actions">
         <Button
@@ -212,4 +216,15 @@ function readableError(error: Error) {
   } catch {
     return error.message;
   }
+}
+
+function parseLongDialogueError(detail: string) {
+  const match = detail.match(/dialogue_audio_exceeds_subtitle_slot:(\d+):(\d+):(\d+):(\d+)/);
+  if (!match) return null;
+  return {
+    episode: Number(match[1]),
+    scene: Number(match[2]),
+    dialogue: Number(match[3]),
+    subtitle: Number(match[4]),
+  };
 }

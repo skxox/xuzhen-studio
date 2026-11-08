@@ -325,6 +325,7 @@ def _align_audio_to_subtitles(audio_clips: list, subtitle_path: Path) -> list[di
     except OSError as error:
         raise MasterRenderError("edit_package_subtitles_unreadable") from error
     cue_windows = []
+    previous_end = -1
     for block in re.split(r"\r?\n\s*\r?\n", subtitle.strip()):
         lines = block.splitlines()
         if len(lines) < 3 or not lines[0].strip().isdigit():
@@ -339,9 +340,17 @@ def _align_audio_to_subtitles(audio_clips: list, subtitle_path: Path) -> list[di
         values = [int(value) for value in match.groups()]
         start = _timestamp_milliseconds(values[:4])
         end = _timestamp_milliseconds(values[4:])
-        if end <= start:
+        if start < previous_end or end <= start:
             raise MasterRenderError("edit_package_subtitles_invalid")
         cue_windows.append((start, end))
+        previous_end = end
+    indices = [clip.get("subtitle_index") for clip in audio_clips]
+    if (
+        len(cue_windows) != len(audio_clips)
+        or not all(type(index) is int for index in indices)
+        or sorted(indices) != list(range(1, len(cue_windows) + 1))
+    ):
+        raise MasterRenderError("edit_package_dialogue_subtitle_mapping_invalid")
     aligned = []
     for clip in audio_clips:
         cue_index = clip.get("subtitle_index")
@@ -369,8 +378,13 @@ def _fit_audio_to_subtitle_windows(
         if slot_ms <= 0:
             raise MasterRenderError("dialogue_audio_timing_invalid")
         tempo = max(1.0, duration / (slot_ms / 1000))
-        if tempo > MAX_DIALOGUE_TEMPO:
-            raise MasterRenderError("dialogue_audio_exceeds_subtitle_slot")
+        if tempo > MAX_DIALOGUE_TEMPO + 1e-6:
+            raise MasterRenderError(
+                "dialogue_audio_exceeds_subtitle_slot:"
+                f"{clip['episode_number']}:{clip['scene_number']}:"
+                f"{clip['dialogue_number']}:{clip['subtitle_index']}"
+            )
+        tempo = min(tempo, MAX_DIALOGUE_TEMPO)
         adjusted_count += tempo > 1.001
         max_tempo = max(max_tempo, tempo)
         fitted.append({**clip, "source_duration_seconds": duration, "tempo": tempo})

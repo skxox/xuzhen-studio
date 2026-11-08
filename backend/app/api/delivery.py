@@ -127,7 +127,7 @@ def create_delivery_master(project_id: str, db: Session = Depends(get_db)):
             "edit_package_sha256": package.sha256,
             "rights_status": project.rights_status,
             "timing_basis": "requested_clip_durations",
-            "audio_sync_basis": "estimated_dialogue_subtitle_slots",
+            "audio_sync_basis": "srt_cue_start_with_ffprobe_duration_fit",
             "render_profile": {
                 "video_codec": "libx264",
                 "video_crf": 20,

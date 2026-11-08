@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownToLine, Check, Clapperboard, Film, Subtitles } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { DeliveryMasterWorkspace } from '../components/workspace/DeliveryMasterWorkspace';
+import { SubtitlePreviewPanel } from '../components/workspace/SubtitlePreviewPanel';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { PageHeading, Panel } from '../components/ui/Panel';
@@ -361,32 +363,20 @@ export function DeliveryPage({ project }: { project?: Project }) {
                 </p>
               )}
             </Panel>
-            <Panel className="delivery-quality">
-              <div className="panel-heading">
-                <div>
-                  <div className="eyebrow">SUBTITLE PREVIEW</div>
-                  <h3>字幕抽样</h3>
-                </div>
-              </div>
-              {subtitlePreview.length ? (
-                <ol className="subtitle-preview">
-                  {subtitlePreview.slice(0, 10).map((cue, index) => (
-                    <li key={`${cue.start_ms}-${index}`}>
-                      <time>{formatTime(cue.start_ms)}</time>
-                      <span>{cue.text}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p>剪辑包生成后显示锁定剧本对应的字幕抽样。</p>
-              )}
-            </Panel>
+            <SubtitlePreviewPanel cues={subtitlePreview} />
           </aside>
         </div>
       )}
+      {project && (
+        <DeliveryMasterWorkspace
+          project={project}
+          deliveryStatus={deliveryStage?.status}
+          postStatus={stage?.status}
+        />
+      )}
       {deliveryStage?.status === 'ready' && (
         <Panel>
-          <p className="success-copy">后期交接包已验收，交付检查阶段已解锁。</p>
+          <p className="success-copy">后期交接包已验收，可以生成最终视频母版。</p>
         </Panel>
       )}
       {latestPackage && (packagesQuery.data?.length ?? 0) > 1 && (
@@ -402,9 +392,4 @@ export function DeliveryPage({ project }: { project?: Project }) {
       )}
     </div>
   );
-}
-
-function formatTime(milliseconds: number) {
-  const seconds = Math.floor(milliseconds / 1000);
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }

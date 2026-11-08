@@ -62,6 +62,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 - `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（支持 OpenAI-compatible 文本、图片、视频和语音档案；协议检查不代表厂商能力验证）
 - `POST/GET /projects/{id}/jobs`、`PUT /projects/{id}/jobs/{job_id}/output`、`GET /projects/{id}/jobs/{job_id}/output/versions`（原创故事圣经、长篇大纲、文学角色圣经和逐章正文支持真实文本生成；正文任务绑定章节序号；请求需数据处理授权并要求阶段处于 running；候选可人工修订并保留旧版本）
 - `GET /projects/{id}/manuscript-releases`、`GET /projects/{id}/manuscript-releases/{release_id}`（作者验收原创稿锁版时追加范围快照；记录章节版本/哈希、连续性报告修订、权利状态和前序发布；章节或权利变更后保留记录但不再标记为当前有效）
+- `GET /delivery/runtime`、`GET/POST /projects/{id}/delivery-masters`、`GET /projects/{id}/delivery-masters/{master_id}/file`（检查 FFmpeg 编码器能力；仅已验收剪辑包且项目权利状态可交付时可生成版本化 MP4 母版候选；通过人工审片后才可验收）
 - Swagger UI：`/docs`
 
 后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
@@ -97,8 +98,8 @@ uv run uvicorn app.main:app --reload
 
 ### M4：成片交付
 
-已接入逐句配音与剪辑交接包首版：语音任务绑定当前已验收剧本和对白哈希，逐句生成、试听、验收或退回；后期需同时满足全部镜头视频和全部剧本对白配音已验收。交接包按锁定分镜顺序打包 MP4、按对白生成 SRT、附带独立音频片段和版本/素材哈希 manifest；交接包需要人工验收后才解锁交付。SRT 时间码以视频请求时长估算，包内明确标注尚未校准实际时长；音频片段尚未混音。仍需 FFmpeg 最终时间线合成、实际时长探测与字幕校准、局部返工影响预览、质量检查和最终母版导出。
+已接入逐句配音、剪辑交接包和 FFmpeg 最终母版合成首版：语音任务绑定当前已验收剧本和对白哈希，逐句生成、试听、验收或退回；后期需同时满足全部镜头视频和全部剧本对白配音已验收。交接包按锁定分镜顺序打包 MP4、按对白生成 SRT、附带独立音频片段和版本/素材哈希 manifest；交接包需要人工验收后才解锁交付。交付阶段将视频归一化后拼接、按 SRT cue 起点混合 TTS、以 MP4 soft subtitle 轨写入中文字幕，并生成可预览/验收/下载的版本化母版。时间线仍按请求镜头时长和估算字幕 cue 定位，最终仍需人工检查同步；母版生成在 API 请求中同步执行，不支持长片后台任务、FFmpeg 实际时长探测或局部片段重渲染。
 
 ## 当前不具备的生产条件
 
-当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、媒体安全扫描和端到端成片合成。视频仅接入特定 OpenAI-compatible 异步 API 子集，语音仅接入 `/v1/audio/speech` 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。系统可生成逐句语音片段与剪辑交接包，但不能宣称已混音或输出最终可交付母版。每完成一项应更新规格差异表与 API schema。
+当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、媒体安全扫描和分布式任务恢复。视频仅接入特定 OpenAI-compatible 异步 API 子集，语音仅接入 `/v1/audio/speech` 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。FFmpeg 母版合成要求系统安装带 `libx264`、`aac`、`mov_text` 编码器的 FFmpeg；长片合成仍在 API 请求中同步执行。系统能够输出版本化 MP4 母版，但时长与字幕同步仍基于估算，须经人工审片。

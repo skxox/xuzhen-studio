@@ -12,6 +12,8 @@ import type {
   CommercialMaterial,
   CreativeBrief,
   CreativeBriefSaveInput,
+  DeliveryMaster,
+  DeliveryRuntime,
   EditPackage,
   GenerationJobSummary,
   KeyframeCandidate,
@@ -132,6 +134,13 @@ export const api = {
     request<EditPackage>(`/projects/${projectId}/edit-packages/${packageId}`),
   createEditPackage: (projectId: string) =>
     request<EditPackage>(`/projects/${projectId}/edit-packages`, { method: 'POST' }),
+  deliveryRuntime: () => request<DeliveryRuntime>('/delivery/runtime'),
+  deliveryMasters: (projectId: string) =>
+    request<DeliveryMaster[]>(`/projects/${projectId}/delivery-masters`),
+  renderDeliveryMaster: (projectId: string) =>
+    request<DeliveryMaster>(`/projects/${projectId}/delivery-masters`, { method: 'POST' }),
+  deliveryMasterFileUrl: (projectId: string, masterId: string) =>
+    `${API_ROOT}/projects/${projectId}/delivery-masters/${masterId}/file`,
   updateEditPackageSubtitles: (projectId: string, packageId: string, srt: string) =>
     request<EditPackage>(`/projects/${projectId}/edit-packages/${packageId}/subtitles`, {
       method: 'PUT',

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from .branches import router as branches_router
 from .chapters import router as chapters_router
 from .creative import router as creative_router
+from .delivery import router as delivery_router
 from .jobs import router as jobs_router
 from .post import router as post_router
 from .projects import router as projects_router
@@ -23,4 +24,5 @@ router.include_router(releases_router)
 router.include_router(scripts_router)
 router.include_router(storyboards_router)
 router.include_router(post_router)
+router.include_router(delivery_router)
 router.include_router(jobs_router)

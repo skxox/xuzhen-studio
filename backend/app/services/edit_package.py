@@ -43,6 +43,7 @@ def build_edit_package(
     manifest_shots: list[dict] = []
     subtitles: list[tuple[int, int, str, str]] = []
     audio_manifest: list[dict] = []
+    dialogue_offsets: dict[tuple[int, int, int], tuple[int, int]] = {}
     if set(audio_candidates) != set(dialogues):
         raise EditPackageError("当前剧本的逐句配音覆盖不完整。")
     for audio_key, audio in sorted(audio_candidates.items()):
@@ -97,8 +98,12 @@ def build_edit_package(
                         raise EditPackageError("分镜对白编号无法对应到已验收剧本。")
                     dialogue_lines.append(line)
                 slots = _subtitle_slots(dialogue_lines, duration_ms)
-                for start, end, speaker, text in slots:
+                if len(slots) != len(dialogue_lines):
+                    raise EditPackageError("镜头时长不足以容纳关联对白，无法建立配音时间线。")
+                for line, (start, end, speaker, text) in zip(dialogue_lines, slots, strict=True):
                     subtitles.append((shot_start + start, shot_start + end, speaker, text))
+                    dialogue_key = (episode_number, scene_number, line["dialogue_number"])
+                    dialogue_offsets.setdefault(dialogue_key, (shot_start + start, len(subtitles)))
                 manifest_shots.append(
                     {
                         "order": len(manifest_shots) + 1,
@@ -117,6 +122,11 @@ def build_edit_package(
                 )
                 timeline_ms += duration_ms
 
+    if set(dialogue_offsets) != set(audio_candidates):
+        raise EditPackageError("存在未关联到镜头的对白，无法安排配音时间线。")
+    for audio in audio_manifest:
+        key = (audio["episode_number"], audio["scene_number"], audio["dialogue_number"])
+        audio["start_ms"], audio["subtitle_index"] = dialogue_offsets[key]
     manifest = {
         "schema_version": "1.0",
         "project_id": project_id,
@@ -212,6 +222,7 @@ def _dialogue_index(episodes: list[dict]) -> dict[tuple[int, int, int], dict]:
                 if not isinstance(speaker, str) or not isinstance(text, str) or not text.strip():
                     raise EditPackageError("已验收剧本对白缺少说话人或内容。")
                 result[(episode_number, scene_number, number)] = {
+                    "dialogue_number": number,
                     "speaker": speaker.strip(),
                     "text": text.strip(),
                     "seconds": _positive_int(dialogue.get("estimated_seconds"), "对白时长"),

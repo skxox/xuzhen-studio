@@ -274,6 +274,26 @@ export interface AudioCandidate {
   file_url: string;
 }
 
+export interface DeliveryMaster {
+  id: string;
+  revision: number;
+  edit_package_id: string;
+  size_bytes: number;
+  sha256: string;
+  duration_seconds: number;
+  width: number;
+  height: number;
+  source_snapshot: Record<string, unknown>;
+  status: 'needs_review' | 'accepted' | 'rejected';
+  created_at: string;
+  file_url: string;
+}
+
+export interface DeliveryRuntime {
+  master_render_available: boolean;
+  message: string | null;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

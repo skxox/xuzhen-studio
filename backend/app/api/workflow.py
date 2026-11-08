@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings
 from ..domain.models import (
     AdaptationBranch,
     AdaptationOutlineRelease,
@@ -12,6 +13,7 @@ from ..domain.models import (
     CommercialBrief,
     CommercialMaterial,
     CreativeBrief,
+    DeliveryMaster,
     EditPackage,
     EpisodeAdaptationOutline,
     EpisodeSourceMapping,
@@ -83,7 +85,8 @@ def decide_stage(
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
     if (
-        stage_key in {"source", "outline", "shotDesign", "keyframes", "video", "voice", "post"}
+        stage_key
+        in {"source", "outline", "shotDesign", "keyframes", "video", "voice", "post", "delivery"}
         and data.action == "waive"
     ):
         raise HTTPException(422, "media_production_gates_cannot_be_waived")
@@ -381,6 +384,7 @@ def decide_stage(
         if not voice_script or audio_candidate.script_release_id != voice_script.id:
             raise HTTPException(409, "audio_candidate_script_snapshot_stale")
     edit_package = None
+    delivery_master = None
     if stage_key == "post" and project.creation_mode == "original":
         package_id = (stage.decision or {}).get("edit_package_id")
         edit_package = db.scalar(
@@ -401,6 +405,32 @@ def decide_stage(
             or edit_package.script_release_id != release.script_release_id
         ):
             raise HTTPException(409, "edit_package_source_releases_are_stale")
+    if stage_key == "delivery" and project.creation_mode == "original":
+        master_id = (stage.decision or {}).get("delivery_master_id")
+        delivery_master = db.scalar(
+            select(DeliveryMaster).where(
+                DeliveryMaster.id == master_id,
+                DeliveryMaster.project_id == project_id,
+                DeliveryMaster.status == "needs_review",
+            )
+        )
+        if not delivery_master:
+            raise HTTPException(409, "delivery_master_candidate_missing")
+        master_path = (settings.storage_dir / delivery_master.storage_key).resolve()
+        if settings.storage_dir.resolve() not in master_path.parents or not master_path.is_file():
+            raise HTTPException(409, "delivery_master_file_missing")
+        post_stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project_id,
+                StageState.stage_key == "post",
+            )
+        )
+        if (
+            not post_stage
+            or post_stage.status != "accepted"
+            or delivery_master.edit_package_id != (post_stage.decision or {}).get("edit_package_id")
+        ):
+            raise HTTPException(409, "delivery_master_source_package_is_stale")
     if (
         stage_key in {"characters", "art"}
         and data.action == "accept"
@@ -976,6 +1006,25 @@ def decide_stage(
             project_id,
             f"post.edit_package_{edit_package.status}",
             edit_package.id,
+            stage.decision,
+        )
+    elif stage_key == "delivery" and delivery_master:
+        delivery_master.status = "accepted" if data.action == "accept" else "rejected"
+        stage.decision = {
+            "action": data.action,
+            "delivery_master_id": delivery_master.id,
+            "revision": delivery_master.revision,
+            "edit_package_id": delivery_master.edit_package_id,
+            "reason": data.reason,
+            "size_bytes": delivery_master.size_bytes,
+            "sha256": delivery_master.sha256,
+            "duration_seconds": delivery_master.duration_seconds,
+        }
+        audit(
+            db,
+            project_id,
+            f"delivery.master_{delivery_master.status}",
+            delivery_master.id,
             stage.decision,
         )
     elif (

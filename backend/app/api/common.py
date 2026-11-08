@@ -3,7 +3,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..domain.models import (
-    AuditEvent,
     CharacterReference,
     CommercialBrief,
     CommercialMaterial,
@@ -12,6 +11,7 @@ from ..domain.models import (
     StageState,
 )
 from ..infrastructure.database import SessionLocal
+from ..services.audit import audit
 from ..services.workflow_policy import stage_dependencies
 
 VIDEO_STAGES = (
@@ -89,10 +89,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def audit(db: Session, project_id: str, event: str, entity: str, payload: dict):
-    db.add(AuditEvent(project_id=project_id, event_type=event, entity_ref=entity, payload=payload))
 
 
 def project_or_404(db: Session, project_id: str) -> Project:

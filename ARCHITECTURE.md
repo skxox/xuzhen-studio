@@ -67,7 +67,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 
 后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
 
-阶段启动与提交审核路由位于 `api/stage_lifecycle.py`；原创改编、角色与美术、媒体和小说候选校验分别位于 `services/adaptation_decisions.py`、`services/media_decisions.py` 和 `services/novel_decisions.py`；阶段依赖与决定规则位于 `services/workflow_policy.py`。`api/workflow.py` 负责串接 HTTP 响应和事务内阶段产物物化，状态、候选与发布记录在一次提交中保持原子性。该路由仍接近 600 行，后续应继续拆出阶段产物物化用例，避免增加阶段分支并保留单事务提交。
+阶段启动与提交审核路由位于 `api/stage_lifecycle.py`；原创改编、角色与美术、媒体和小说候选校验分别位于 `services/adaptation_decisions.py`、`services/media_decisions.py` 和 `services/novel_decisions.py`；阶段依赖与决定规则位于 `services/workflow_policy.py`。`api/workflow.py` 负责 HTTP 校验、错误映射和响应；`services/stage_decisions.py` 协调阶段决定物化，并按小说、改编发布和媒体候选拆分到对应的 `*_materialization.py` 服务。审核状态、候选状态、发布记录和审计事件仍通过同一 SQLAlchemy Session 在一次提交中保持原子性。
 
 ## 开发启动
 

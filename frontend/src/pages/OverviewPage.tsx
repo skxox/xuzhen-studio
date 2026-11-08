@@ -195,9 +195,19 @@ export function OverviewPage({ project, onCreate, onSelectProject }: Props) {
               <span className="live-dot" />
               AI 提供候选，人工决定是否采纳
             </span>
-            <Link to={currentStage ? stageRoute(currentStage.stage_key) : '/source'}>
-              {currentStage ? `继续${currentStage.label}` : '进入项目'} <ArrowRight size={14} />
-            </Link>
+            {currentStage?.unavailable_reason ? (
+              <span
+                className="workflow-link-disabled"
+                title={currentStage.unavailable_reason}
+                aria-disabled="true"
+              >
+                当前阶段未开放
+              </span>
+            ) : (
+              <Link to={currentStage ? stageRoute(currentStage.stage_key) : '/source'}>
+                {currentStage ? `继续${currentStage.label}` : '进入项目'} <ArrowRight size={14} />
+              </Link>
+            )}
           </div>
         </Panel>
         <Panel className="overview-review">
@@ -301,6 +311,21 @@ function StatCard({
 
 function ReviewRow({ stage }: { stage: StageState }) {
   const tone = stage.status === 'needs_review' ? 'gold' : 'violet';
+  const unavailableReason = stage.unavailable_reason;
+  if (unavailableReason) {
+    return (
+      <div className="review-row is-unavailable" title={unavailableReason} aria-disabled="true">
+        <div className={`review-thumb review-thumb--${tone}`}>
+          {stage.status === 'needs_review' ? <BookOpen size={15} /> : <span>!</span>}
+        </div>
+        <div className="review-row__copy">
+          <b>{stage.label}</b>
+          <small>暂未开放 · {stage.expected_output}</small>
+        </div>
+        <span className="review-row__action">暂不可处理</span>
+      </div>
+    );
+  }
   return (
     <Link className="review-row" to={stageRoute(stage.stage_key)}>
       <div className={`review-thumb review-thumb--${tone}`}>

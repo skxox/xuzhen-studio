@@ -25,6 +25,7 @@ function AdaptationWritingPage({ project }: { project?: Project }) {
   });
   const stages = stagesQuery.data ?? [];
   const currentStage = selectCurrentStage(stages);
+  const currentStageUnavailable = currentStage?.unavailable_reason ?? undefined;
 
   return (
     <div className="writing-page">
@@ -70,6 +71,11 @@ function AdaptationWritingPage({ project }: { project?: Project }) {
               <div className="writing-state">项目尚无可展示的制作阶段。</div>
             )}
           </Panel>
+          {currentStageUnavailable && (
+            <div className="inline-notice" role="note">
+              {currentStageUnavailable}
+            </div>
+          )}
           {currentStage && (
             <Panel className="writing-next-step">
               <div>
@@ -77,9 +83,15 @@ function AdaptationWritingPage({ project }: { project?: Project }) {
                 <h2>{currentStage.label}</h2>
                 <p>{stageDescription(currentStage)}</p>
               </div>
-              <Link to={stageRoute(currentStage.stage_key)} className="button button--primary">
-                打开阶段 <ArrowRight size={15} />
-              </Link>
+              {currentStageUnavailable ? (
+                <span className="button button--primary" aria-disabled="true">
+                  当前阶段未开放
+                </span>
+              ) : (
+                <Link to={stageRoute(currentStage.stage_key)} className="button button--primary">
+                  打开阶段 <ArrowRight size={15} />
+                </Link>
+              )}
             </Panel>
           )}
         </>

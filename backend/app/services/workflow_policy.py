@@ -37,15 +37,22 @@ class StageDecisionPolicyError(Exception):
 
 
 def validate_stage_mode(project: Project, stage_key: str) -> None:
-    if project.creation_mode != "original" and stage_key in VIDEO_PRODUCTION_STAGES:
+    if reason := stage_mode_unavailable_reason(project, stage_key):
         raise StageDecisionPolicyError(
             409,
             {
                 "code": "video_pipeline_mode_not_supported",
                 "creation_mode": project.creation_mode,
                 "stage_key": stage_key,
+                "reason": reason,
             },
         )
+
+
+def stage_mode_unavailable_reason(project: Project, stage_key: str) -> str | None:
+    if project.creation_mode != "original" and stage_key in VIDEO_PRODUCTION_STAGES:
+        return "当前版本暂不支持导入小说或商品项目的后续视频生产流程。"
+    return None
 
 
 def stage_dependencies(project: Project, stage_key: str) -> tuple[str, ...]:

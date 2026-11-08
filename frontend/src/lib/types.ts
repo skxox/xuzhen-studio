@@ -440,6 +440,8 @@ export interface StageState {
   responsibility: string;
   expected_output: string;
   depends_on: string[];
+  available: boolean;
+  unavailable_reason: string | null;
   status:
     | 'not_started'
     | 'ready'

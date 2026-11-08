@@ -292,6 +292,7 @@ function StageInspector({
               ? '/writing/script'
               : (stageRoutes[stage.stage_key] ?? '/');
   const status = statusLabel(stage.status);
+  const unavailableReason = stage.unavailable_reason ?? undefined;
   const params = job?.input_snapshot.parameters;
   return (
     <aside className="graph-inspector">
@@ -314,6 +315,15 @@ function StageInspector({
             <span>
               <b>等待人工审阅</b>
               <small>下游阶段保持锁定，需先在阶段工作区确认或退回候选。</small>
+            </span>
+          </div>
+        )}
+        {unavailableReason && (
+          <div className="stage-review-alert" role="note">
+            <AlertCircle size={15} />
+            <span>
+              <b>该阶段暂未开放</b>
+              <small>{unavailableReason}</small>
             </span>
           </div>
         )}
@@ -379,9 +389,15 @@ function StageInspector({
           )}
         </section>
         <div className="stage-inspector__footer">
-          <Link className="button button--sm" to={route}>
-            打开阶段工作区 <ArrowUpRight size={13} />
-          </Link>
+          {unavailableReason ? (
+            <span className="button button--sm" aria-disabled="true" title={unavailableReason}>
+              当前阶段未开放
+            </span>
+          ) : (
+            <Link className="button button--sm" to={route}>
+              打开阶段工作区 <ArrowUpRight size={13} />
+            </Link>
+          )}
           <span>画布只读；节点编辑在对应阶段页面完成。</span>
         </div>
       </Panel>

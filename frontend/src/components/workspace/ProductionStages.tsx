@@ -1,4 +1,5 @@
 import { Check, Circle, Dot } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { StageState } from '../../lib/types';
 import { Badge } from '../ui/Badge';
@@ -11,12 +12,13 @@ export function ProductionStages({ stages = [] }: { stages?: StageState[] }) {
     <div className="production-stages" aria-label="项目制作阶段">
       {stages.map((stage, index) => {
         const state = stageState(stage.status);
+        const unavailableReason = stage.unavailable_reason ?? undefined;
         return (
-          <Link
+          <StageEntry
             key={stage.id}
-            to={stageRoute(stage.stage_key)}
-            title={`${stage.label} · ${statusLabel(stage.status)}`}
-            className={`production-stage production-stage--${state}`}
+            stage={stage}
+            state={state}
+            unavailableReason={unavailableReason}
           >
             <span className="production-stage__mark">
               {state === 'done' ? (
@@ -31,13 +33,40 @@ export function ProductionStages({ stages = [] }: { stages?: StageState[] }) {
             {index < stages.length - 1 && (
               <i className={`production-stage__line ${state === 'done' ? 'is-done' : ''}`} />
             )}
-          </Link>
+          </StageEntry>
         );
       })}
       <Badge tone={active?.status === 'needs_review' ? 'gold' : 'neutral'}>
         {completed} / {stages.length} 已完成
       </Badge>
     </div>
+  );
+}
+
+function StageEntry({
+  stage,
+  state,
+  unavailableReason,
+  children,
+}: {
+  stage: StageState;
+  state: string;
+  unavailableReason?: string;
+  children: ReactNode;
+}) {
+  const className = `production-stage production-stage--${state}${unavailableReason ? ' is-unavailable' : ''}`;
+  const title = unavailableReason ?? `${stage.label} · ${statusLabel(stage.status)}`;
+  if (unavailableReason) {
+    return (
+      <span className={className} title={title} aria-disabled="true">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <Link to={stageRoute(stage.stage_key)} title={title} className={className}>
+      {children}
+    </Link>
   );
 }
 

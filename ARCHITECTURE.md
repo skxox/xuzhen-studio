@@ -54,7 +54,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 
 - `GET /health`
 - `POST/GET /projects`、`GET /projects/{id}`
-- `GET /projects/{id}/stages`、`POST /projects/{id}/stages/{stage}/start`、`POST /projects/{id}/stages/{stage}/submit-review`、`POST /projects/{id}/stages/{stage}/decision`
+- `GET /projects/{id}/stages`（含当前模式可用性与不可用原因）、`POST /projects/{id}/stages/{stage}/start`、`POST /projects/{id}/stages/{stage}/submit-review`、`POST /projects/{id}/stages/{stage}/decision`
 - `POST/GET /projects/{id}/chapters`、`POST /projects/{id}/chapters/upload`、`PUT /projects/{id}/chapters/{chapter_id}`、`GET /projects/{id}/chapters/{chapter_id}/versions`、`POST /projects/{id}/chapters/{chapter_id}/restore`（TXT/MD 导入、章节修订与恢复）
 - `PATCH /projects/{id}/rights`（原作权利状态）
 - `GET/PUT /projects/{id}/creative-brief`（仅原创项目；保存简报修订与权利确认声明，并进入作者确认门禁）

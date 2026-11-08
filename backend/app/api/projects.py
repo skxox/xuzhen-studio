@@ -6,6 +6,7 @@ from ..domain.models import (
     Project,
     StageState,
 )
+from ..services.workflow_policy import stage_mode_unavailable_reason
 from .common import (
     COMMERCIAL_STAGES,
     NOVEL_STAGES,
@@ -171,24 +172,29 @@ def get_stages(project_id: str, db: Session = Depends(get_db)):
         for stage in db.scalars(select(StageState).where(StageState.project_id == project_id)).all()
     }
     stages = [stages_by_key[key] for key in stage_path if key in stages_by_key]
-    return [
-        {
-            "id": stage.id,
-            "stage_key": stage.stage_key,
-            "label": STAGE_METADATA.get(stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物"))[
-                0
-            ],
-            "responsibility": STAGE_METADATA.get(
-                stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物")
-            )[1],
-            "expected_output": STAGE_METADATA.get(
-                stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物")
-            )[2],
-            "depends_on": list(stage_dependencies(project, stage.stage_key)),
-            "status": stage.status,
-            "version": stage.version,
-            "stale": stage.stale,
-            "decision": stage.decision,
-        }
-        for stage in stages
-    ]
+    response = []
+    for stage in stages:
+        unavailable_reason = stage_mode_unavailable_reason(project, stage.stage_key)
+        response.append(
+            {
+                "id": stage.id,
+                "stage_key": stage.stage_key,
+                "label": STAGE_METADATA.get(
+                    stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物")
+                )[0],
+                "responsibility": STAGE_METADATA.get(
+                    stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物")
+                )[1],
+                "expected_output": STAGE_METADATA.get(
+                    stage.stage_key, (stage.stage_key, "生产阶段", "阶段产物")
+                )[2],
+                "depends_on": list(stage_dependencies(project, stage.stage_key)),
+                "available": unavailable_reason is None,
+                "unavailable_reason": unavailable_reason,
+                "status": stage.status,
+                "version": stage.version,
+                "stale": stage.stale,
+                "decision": stage.decision,
+            }
+        )
+    return response

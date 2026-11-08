@@ -1,6 +1,6 @@
 # 叙帧技术架构（MVP 基线）
 
-产品目标、功能门禁和按依赖拆分的委派任务见 [生产平台功能规格](docs/product/production-platform-spec.md) 与 [开发路线图](docs/product/development-roadmap.md)。
+产品目标、功能门禁、功能任务卡和相对迭代顺序见 [生产平台功能规格](docs/product/production-platform-spec.md)、[功能任务卡](docs/product/feature-backlog.md)、[开发路线图](docs/product/development-roadmap.md) 与 [执行计划](docs/product/execution-plan.md)。
 
 ## 决策摘要
 

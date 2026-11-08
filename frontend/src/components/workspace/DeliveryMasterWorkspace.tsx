@@ -110,34 +110,53 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
             {latestMaster.sha256.slice(0, 12)}
           </p>
           {qualityReport ? (
-            <p>
-              自动检查通过 · H.264 {qualityReport.video.packets_read} 包 · AAC{' '}
-              {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read}/
-              {qualityReport.subtitle.expected_packets} 条 · 时长偏差{' '}
-              {qualityReport.duration_delta_seconds.toFixed(2)} 秒
-              {qualityReport.dialogue_audio_fit?.passed ? (
-                <>
-                  {' '}
-                  · 配音加速 {qualityReport.dialogue_audio_fit.speed_adjusted_count}/
-                  {qualityReport.dialogue_audio_fit.clip_count} 句，最高{' '}
-                  {qualityReport.dialogue_audio_fit.max_tempo.toFixed(2)}×
-                </>
-              ) : (
-                ' · 缺少对白时间适配检查，请重新合成'
-              )}
-              {qualityReport.video_timing_fit?.passed ? (
-                <>
-                  {' '}
-                  · 镜头时长处理：裁短 {
-                    qualityReport.video_timing_fit.trimmed_count
-                  } 条，末帧补足 {qualityReport.video_timing_fit.held_last_frame_count}{' '}
-                  条，最大源时长偏差{' '}
-                  {qualityReport.video_timing_fit.max_duration_delta_seconds.toFixed(2)} 秒
-                </>
-              ) : (
-                ' · 缺少镜头时长校准检查，请重新合成'
-              )}
-            </p>
+            <>
+              <p>
+                自动检查通过 · H.264 {qualityReport.video.packets_read} 包 · AAC{' '}
+                {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read}/
+                {qualityReport.subtitle.expected_packets} 条 · 时长偏差{' '}
+                {qualityReport.duration_delta_seconds.toFixed(2)} 秒
+                {qualityReport.dialogue_audio_fit?.passed ? (
+                  <>
+                    {' '}
+                    · 配音加速 {qualityReport.dialogue_audio_fit.speed_adjusted_count}/
+                    {qualityReport.dialogue_audio_fit.clip_count} 句，最高{' '}
+                    {qualityReport.dialogue_audio_fit.max_tempo.toFixed(2)}×
+                  </>
+                ) : (
+                  ' · 缺少对白时间适配检查，请重新合成'
+                )}
+                {qualityReport.video_timing_fit?.passed ? (
+                  <>
+                    {' '}
+                    · 镜头时长处理：裁短 {
+                      qualityReport.video_timing_fit.trimmed_count
+                    } 条，末帧补足 {qualityReport.video_timing_fit.held_last_frame_count}{' '}
+                    条，最大源时长偏差{' '}
+                    {qualityReport.video_timing_fit.max_duration_delta_seconds.toFixed(2)} 秒
+                  </>
+                ) : (
+                  ' · 缺少镜头时长校准检查，请重新合成'
+                )}
+              </p>
+              {qualityReport.video_timing_fit?.adjustments?.length ? (
+                <details className="master-timing-adjustments">
+                  <summary>
+                    查看 {qualityReport.video_timing_fit.adjustments.length} 个镜头时长调整明细
+                  </summary>
+                  <ul>
+                    {qualityReport.video_timing_fit.adjustments.map((item) => (
+                      <li key={`${item.episode_number}-${item.scene_number}-${item.shot_number}`}>
+                        第 {item.episode_number} 集 · 第 {item.scene_number} 场 · 镜头{' '}
+                        {item.shot_number}：实测 {item.source_duration_seconds.toFixed(2)} 秒，目标{' '}
+                        {item.requested_duration_seconds.toFixed(2)} 秒；
+                        {item.action === 'trim' ? '裁短尾部' : '冻结末帧补足'}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </>
           ) : (
             <p className="form-error">该母版没有新版 FFprobe 质量报告，请退回并重新合成。</p>
           )}

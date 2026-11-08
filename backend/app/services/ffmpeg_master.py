@@ -423,19 +423,30 @@ def _fit_video_clips_to_requested_duration(
     trimmed_count = 0
     held_count = 0
     max_delta = 0.0
+    adjustments = []
     for shot, actual_duration in zip(shots, durations, strict=True):
         requested = _positive_number(shot.get("duration_seconds_requested"))
         delta = actual_duration - requested
         max_delta = max(max_delta, abs(delta))
         trimmed_count += delta > 0.05
         held_count += delta < -0.05
+        action = "trim" if delta > 0.05 else "hold_last_frame" if delta < -0.05 else "none"
+        if action != "none":
+            adjustments.append(
+                {
+                    "episode_number": shot.get("episode_number"),
+                    "scene_number": shot.get("scene_number"),
+                    "shot_number": shot.get("shot_number"),
+                    "source_duration_seconds": round(actual_duration, 3),
+                    "requested_duration_seconds": requested,
+                    "action": action,
+                }
+            )
         fitted.append(
             {
                 **shot,
                 "source_duration_seconds": round(actual_duration, 3),
-                "timing_adjustment": (
-                    "trim" if delta > 0.05 else "hold_last_frame" if delta < -0.05 else "none"
-                ),
+                "timing_adjustment": action,
             }
         )
     return fitted, {
@@ -444,6 +455,7 @@ def _fit_video_clips_to_requested_duration(
         "trimmed_count": trimmed_count,
         "held_last_frame_count": held_count,
         "max_duration_delta_seconds": round(max_delta, 3),
+        "adjustments": adjustments,
     }
 
 

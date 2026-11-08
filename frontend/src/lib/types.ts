@@ -324,6 +324,14 @@ export interface MasterQualityReport {
     trimmed_count: number;
     held_last_frame_count: number;
     max_duration_delta_seconds: number;
+    adjustments: Array<{
+      episode_number: number;
+      scene_number: number;
+      shot_number: number;
+      source_duration_seconds: number;
+      requested_duration_seconds: number;
+      action: 'trim' | 'hold_last_frame';
+    }>;
   };
 }
 

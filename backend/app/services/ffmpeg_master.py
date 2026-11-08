@@ -136,6 +136,7 @@ def render_master(
             expected_duration=duration,
             expected_width=width,
             expected_height=height,
+            expected_subtitle_count=dialogue_fit["clip_count"],
         )
         quality_report["dialogue_audio_fit"] = dialogue_fit
     except MediaProbeError as error:

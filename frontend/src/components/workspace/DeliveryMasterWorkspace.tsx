@@ -112,8 +112,9 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
           {qualityReport ? (
             <p>
               自动检查通过 · H.264 {qualityReport.video.packets_read} 包 · AAC{' '}
-              {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read} 条
-              · 时长偏差 {qualityReport.duration_delta_seconds.toFixed(2)} 秒
+              {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read}/
+              {qualityReport.subtitle.expected_packets} 条 · 时长偏差{' '}
+              {qualityReport.duration_delta_seconds.toFixed(2)} 秒
               {qualityReport.dialogue_audio_fit?.passed ? (
                 <>
                   {' '}

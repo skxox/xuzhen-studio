@@ -28,6 +28,7 @@ def inspect_master(
     expected_duration: float,
     expected_width: int,
     expected_height: int,
+    expected_subtitle_count: int,
 ) -> dict:
     executable = shutil.which(ffprobe_binary)
     if not executable:
@@ -80,6 +81,9 @@ def inspect_master(
         raise MediaProbeError("master_audio_or_subtitle_stream_invalid")
     if any(_packet_count(stream.get("nb_read_packets")) < 1 for stream in streams):
         raise MediaProbeError("master_stream_contains_no_packets")
+    subtitle_packets = _packet_count(subtitle.get("nb_read_packets"))
+    if subtitle_packets != expected_subtitle_count:
+        raise MediaProbeError("master_subtitle_cue_count_mismatch")
     video_duration = _stream_duration(video, container_duration)
     audio_duration = _stream_duration(audio, container_duration)
     tolerance = max(0.5, expected_duration * 0.01)
@@ -112,7 +116,8 @@ def inspect_master(
         },
         "subtitle": {
             "codec": subtitle["codec_name"],
-            "packets_read": _packet_count(subtitle["nb_read_packets"]),
+            "packets_read": subtitle_packets,
+            "expected_packets": expected_subtitle_count,
         },
     }
 

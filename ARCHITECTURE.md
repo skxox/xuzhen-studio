@@ -67,7 +67,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 
 后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
 
-阶段启动与提交审核路由位于 `api/stage_lifecycle.py`；阶段决定仍集中在 `api/workflow.py`，因为目前它需要在同一数据库事务中校验不同候选、写入版本化产物并更新门禁。该文件超过 600 行是已知维护风险。后续应把各阶段候选校验和产物物化拆成 `services/` 用例，并保留单事务提交；在完成拆分前不再向该模块增加新的阶段分支。
+阶段启动与提交审核路由位于 `api/stage_lifecycle.py`；原创分集映射、大纲、剧本和分镜候选的上游校验与结构解析位于 `services/adaptation_decisions.py`。`api/workflow.py` 仍负责阶段决定事务及版本化产物物化，确保阶段状态、候选状态和发布记录原子提交。该文件超过 600 行是已知维护风险；后续应把剩余候选校验与各阶段产物物化继续拆成 `services/` 用例，并保留单事务提交；在完成拆分前不再向该模块增加新的阶段分支。
 
 ## 开发启动
 

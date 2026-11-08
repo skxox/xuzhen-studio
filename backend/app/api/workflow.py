@@ -25,17 +25,15 @@ from ..domain.models import (
     StageState,
     VideoCandidate,
 )
+from ..services.adaptation_decisions import (
+    AdaptationDecisionError,
+    AdaptationDecisions,
+    validate_adaptation_decision,
+)
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
     current_adaptation_branch,
     current_adaptation_outline_context,
-    current_adaptation_script_context,
-    current_adaptation_script_release_context,
-    current_release_chapters,
-    parse_adaptation_outline,
-    parse_episode_source_mapping,
-    parse_script_candidate,
-    parse_storyboard_plan,
 )
 from ..services.continuity import (
     ContinuityReportError,
@@ -116,202 +114,18 @@ def decide_stage(
             raise HTTPException(422, "source_requires_at_least_one_chapter")
         if project.rights_status == "unconfirmed":
             raise HTTPException(422, "source_rights_must_be_recorded")
-    mapping_decision = None
-    if stage_key == "source" and data.action == "accept" and project.creation_mode == "original":
-        if project.rights_status == "unconfirmed":
-            raise HTTPException(422, "original_work_rights_must_be_recorded")
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == "source",
-                GenerationJob.status == "succeeded",
-            )
+    try:
+        adaptation_decisions = (
+            validate_adaptation_decision(db, project, stage, stage_key)
+            if data.action == "accept"
+            else AdaptationDecisions()
         )
-        output = (
-            db.scalar(
-                select(GenerationOutput).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        scope = (candidate_job.input_snapshot.get("scope") or {}) if candidate_job else {}
-        if not candidate_job or not output:
-            raise HTTPException(409, "episode_source_mapping_candidate_missing")
-        try:
-            release, release_chapters = current_release_chapters(
-                db, project, str(scope.get("release_id", ""))
-            )
-            mapping = parse_episode_source_mapping(
-                output.content,
-                expected_release_id=release.id,
-                expected_episode_count=scope["episode_count"],
-                expected_episode_seconds=scope["episode_seconds"],
-                expected_aspect_ratio=scope["aspect_ratio"],
-                allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
-            )
-        except (EpisodeSourceMappingError, KeyError) as error:
-            raise HTTPException(422, str(error)) from None
-        mapping_decision = {
-            "candidate_job_id": candidate_job.id,
-            "release_id": release.id,
-            "episode_count": mapping.episode_count,
-            "episode_seconds": mapping.episode_seconds,
-            "aspect_ratio": mapping.aspect_ratio,
-            "episodes": mapping.episodes,
-        }
-    outline_decision = None
-    if stage_key == "outline" and data.action == "accept" and project.creation_mode == "original":
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == "outline",
-                GenerationJob.status == "succeeded",
-            )
-        )
-        output = (
-            db.scalar(
-                select(GenerationOutput).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        if not candidate_job or not output:
-            raise HTTPException(409, "adaptation_outline_candidate_missing")
-        try:
-            branch, mappings = current_adaptation_branch(db, project)
-            scope = candidate_job.input_snapshot.get("scope") or {}
-            if scope.get("branch_id") != branch.id:
-                raise EpisodeSourceMappingError("候选对应的改编分支已变化。")
-            outline = parse_adaptation_outline(
-                output.content,
-                branch_id=branch.id,
-                release_id=branch.release_id,
-                episode_seconds=branch.episode_seconds,
-                aspect_ratio=branch.aspect_ratio,
-                mappings=[{"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings],
-            )
-        except EpisodeSourceMappingError as error:
-            raise HTTPException(422, str(error)) from None
-        outline_decision = {"candidate_job_id": candidate_job.id, "outline": outline}
-    script_decision = None
-    if stage_key == "script" and data.action == "accept" and project.creation_mode == "original":
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == "script",
-                GenerationJob.status == "succeeded",
-            )
-        )
-        output = (
-            db.scalar(
-                select(GenerationOutput).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        if not candidate_job or not output:
-            raise HTTPException(409, "episode_script_candidate_missing")
-        try:
-            branch, outline_release, outline_episodes, character_job, art_job = (
-                current_adaptation_script_context(db, project)
-            )
-            _, release_chapters = current_release_chapters(db, project, branch.release_id)
-            scope = candidate_job.input_snapshot.get("scope") or {}
-            if (
-                scope.get("branch_id") != branch.id
-                or scope.get("outline_release_id") != outline_release.id
-                or scope.get("character_job_id") != character_job.id
-                or scope.get("art_job_id") != art_job.id
-            ):
-                raise EpisodeSourceMappingError("剧本候选引用的上游版本已变化。")
-            script = parse_script_candidate(
-                output.content,
-                branch_id=branch.id,
-                release_id=branch.release_id,
-                outline_release_id=outline_release.id,
-                character_job_id=character_job.id,
-                art_job_id=art_job.id,
-                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-                chapter_bodies={chapter.ordinal: chapter.body for chapter in release_chapters},
-            )
-        except EpisodeSourceMappingError as error:
-            raise HTTPException(422, str(error)) from None
-        script_decision = {
-            "candidate_job_id": candidate_job.id,
-            "branch_id": branch.id,
-            "outline_release_id": outline_release.id,
-            "character_job_id": character_job.id,
-            "art_job_id": art_job.id,
-            "episodes": script.episodes,
-        }
-    shot_plan_decision = None
-    if (
-        stage_key == "shotDesign"
-        and data.action == "accept"
-        and project.creation_mode == "original"
-    ):
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == "shotDesign",
-                GenerationJob.status == "succeeded",
-            )
-        )
-        output = (
-            db.scalar(
-                select(GenerationOutput).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        if not candidate_job or not output:
-            raise HTTPException(409, "storyboard_candidate_missing")
-        try:
-            branch, outline_release, outline_episodes, script_release, character_job, art_job = (
-                current_adaptation_script_release_context(db, project)
-            )
-            scope = candidate_job.input_snapshot.get("scope") or {}
-            if scope.get("script_release_id") != script_release.id:
-                raise EpisodeSourceMappingError("分镜候选对应的剧本版本已变化。")
-            plan = parse_storyboard_plan(
-                output.content,
-                branch_id=branch.id,
-                script_release_id=script_release.id,
-                character_job_id=character_job.id,
-                art_job_id=art_job.id,
-                script_episodes=script_release.episodes,
-                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
-            )
-        except EpisodeSourceMappingError as error:
-            raise HTTPException(422, str(error)) from None
-        shot_plan_decision = {
-            "candidate_job_id": candidate_job.id,
-            "branch_id": branch.id,
-            "script_release_id": script_release.id,
-            "character_job_id": character_job.id,
-            "art_job_id": art_job.id,
-            "episodes": plan.episodes,
-        }
+    except AdaptationDecisionError as error:
+        raise HTTPException(error.status_code, error.detail) from None
+    mapping_decision = adaptation_decisions.mapping
+    outline_decision = adaptation_decisions.outline
+    script_decision = adaptation_decisions.script
+    shot_plan_decision = adaptation_decisions.shot_plan
     keyframe_candidate = None
     if stage_key == "keyframes" and project.creation_mode == "original":
         candidate_job_id = (stage.decision or {}).get("candidate_job_id")

@@ -71,6 +71,45 @@ export interface AdaptationBranch {
   }>;
 }
 
+export interface AdaptationOutlineRelease {
+  id: string;
+  branch_id: string;
+  revision: number;
+  job_id: string;
+  episode_count: number;
+  creative_thesis: string;
+  is_current: boolean;
+  created_at: string;
+  episodes: Array<{
+    episode_number: number;
+    source_chapter_ordinals: number[];
+    adaptation_summary: string;
+    emotional_arc: string;
+    ending_hook: string;
+    scenes: AdaptationOutlineScene[];
+  }>;
+}
+
+export interface AdaptationOutlineBeat {
+  beat_number: number;
+  action: string;
+  turn: string;
+}
+
+export interface AdaptationOutlineScene {
+  scene_number: number;
+  slugline: string;
+  location: string;
+  time_of_day: string;
+  character_names: string[];
+  purpose: string;
+  conflict: string;
+  estimated_seconds: number;
+  source_chapter_ordinals: number[];
+  is_adaptation_addition: boolean;
+  beats: AdaptationOutlineBeat[];
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

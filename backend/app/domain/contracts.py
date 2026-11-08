@@ -104,3 +104,84 @@ class EpisodeSourceMappingPlanCandidate(BaseModel):
     episode_seconds: int = Field(ge=10, le=7200)
     aspect_ratio: str = Field(min_length=1, max_length=16)
     episodes: list[EpisodeSourceMappingCandidate] = Field(min_length=1, max_length=500)
+
+
+class AdaptationBeatCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    beat_number: int = Field(ge=1)
+    action: str = Field(min_length=1, max_length=1000)
+    turn: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("action", "turn", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class AdaptationSceneCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_number: int = Field(ge=1)
+    slugline: str = Field(min_length=1, max_length=300)
+    location: str = Field(min_length=1, max_length=200)
+    time_of_day: str = Field(min_length=1, max_length=100)
+    character_names: list[str] = Field(min_length=1, max_length=20)
+    purpose: str = Field(min_length=1, max_length=1200)
+    conflict: str = Field(min_length=1, max_length=1200)
+    estimated_seconds: int = Field(ge=1, le=7200)
+    source_chapter_ordinals: list[int] = Field(default_factory=list, max_length=200)
+    is_adaptation_addition: bool = False
+    beats: list[AdaptationBeatCandidate] = Field(min_length=2, max_length=12)
+
+    @field_validator(
+        "slugline",
+        "location",
+        "time_of_day",
+        "purpose",
+        "conflict",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("character_names", mode="before")
+    @classmethod
+    def normalize_characters(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return value
+
+
+class EpisodeAdaptationOutlineCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_number: int = Field(ge=1)
+    source_chapter_ordinals: list[int] = Field(min_length=1, max_length=200)
+    adaptation_summary: str = Field(min_length=1, max_length=2000)
+    emotional_arc: str = Field(min_length=1, max_length=1200)
+    ending_hook: str = Field(min_length=1, max_length=1000)
+    scenes: list[AdaptationSceneCandidate] = Field(min_length=1, max_length=30)
+
+    @field_validator("adaptation_summary", "emotional_arc", "ending_hook", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class AdaptationOutlineCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    branch_id: str = Field(min_length=36, max_length=36)
+    release_id: str = Field(min_length=36, max_length=36)
+    episode_count: int = Field(ge=1, le=500)
+    episode_seconds: int = Field(ge=10, le=7200)
+    aspect_ratio: str = Field(min_length=1, max_length=16)
+    creative_thesis: str = Field(min_length=1, max_length=2000)
+    episodes: list[EpisodeAdaptationOutlineCandidate] = Field(min_length=1, max_length=500)
+
+    @field_validator("creative_thesis", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value

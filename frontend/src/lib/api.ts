@@ -1,6 +1,7 @@
 import type {
   ApiHealth,
   AdaptationBranch,
+  AdaptationOutlineRelease,
   Chapter,
   ChapterImportResult,
   CharacterReference,
@@ -101,6 +102,8 @@ export const api = {
     request<ManuscriptRelease[]>(`/projects/${projectId}/manuscript-releases`),
   adaptationBranches: (projectId: string) =>
     request<AdaptationBranch[]>(`/projects/${projectId}/adaptation-branches`),
+  adaptationOutlines: (projectId: string) =>
+    request<AdaptationOutlineRelease[]>(`/projects/${projectId}/adaptation-outlines`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   startStage: (projectId: string, stage: string) =>
     request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(

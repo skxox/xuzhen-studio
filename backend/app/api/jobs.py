@@ -15,7 +15,9 @@ from ..domain.models import (
 )
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
+    current_adaptation_branch,
     current_release_chapters,
+    parse_adaptation_outline,
     parse_episode_source_mapping,
 )
 from ..services.continuity import ContinuityReportError, parse_continuity_report
@@ -122,8 +124,11 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             or type(episode_seconds) is not int
             or not isinstance(aspect_ratio, str)
             or episode_count < 1
+            or episode_count > 500
             or episode_seconds < 10
+            or episode_seconds > 7200
             or not aspect_ratio.strip()
+            or len(aspect_ratio) > 16
         ):
             raise HTTPException(422, "adaptation_mapping_scope_invalid")
         try:
@@ -134,6 +139,23 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             raise HTTPException(422, "episode_count_exceeds_locked_chapter_count")
         if not {chapter.id for chapter in release_chapters}.issubset(set(data.input_refs)):
             raise HTTPException(409, "adaptation_mapping_release_chapters_changed")
+    if data.stage_key == "outline" and project.creation_mode == "original":
+        scope = data.scope
+        try:
+            branch, _ = current_adaptation_branch(db, project)
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(409, str(error)) from None
+        if (
+            scope.get("branch_id") != branch.id
+            or scope.get("release_id") != branch.release_id
+            or scope.get("branch_revision") != branch.revision
+        ):
+            raise HTTPException(409, "adaptation_branch_snapshot_changed")
+        _, release_chapters = current_release_chapters(db, project, branch.release_id)
+        if branch.id not in data.input_refs or not {
+            chapter.id for chapter in release_chapters
+        }.issubset(set(data.input_refs)):
+            raise HTTPException(409, "adaptation_outline_inputs_incomplete")
     if not data.data_authorized:
         raise HTTPException(422, "model_data_processing_consent_required")
     supported = data.modality == "text" and profile.adapter_id == "openai-compatible-chat"
@@ -413,6 +435,48 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "error": job.error,
                 "provider_snapshot": job.provider_snapshot,
             }
+    if data.stage_key == "outline" and project.creation_mode == "original":
+        try:
+            branch, mappings = current_adaptation_branch(db, project)
+            _, release_chapters = current_release_chapters(db, project, branch.release_id)
+            scope = job.input_snapshot.get("scope") or {}
+            if scope.get("branch_id") != branch.id:
+                raise EpisodeSourceMappingError("改编分支已变化，大纲候选已失效。")
+            parse_adaptation_outline(
+                content,
+                branch_id=branch.id,
+                release_id=branch.release_id,
+                episode_seconds=branch.episode_seconds,
+                aspect_ratio=branch.aspect_ratio,
+                mappings=[{"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings],
+            )
+            if not {chapter.id for chapter in release_chapters}.issubset(
+                set(job.input_snapshot.get("input_refs", []))
+            ):
+                raise EpisodeSourceMappingError("锁版章节输入引用已变化。")
+        except EpisodeSourceMappingError as error:
+            stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
+                )
+            )
+            job.status = "failed"
+            job.error = {"code": "invalid_adaptation_outline", "message": str(error)}
+            if (
+                stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+            ):
+                stage.status = "failed"
+                stage.version += 1
+            audit(db, project_id, "job.failed", job.id, job.error)
+            db.commit()
+            return {
+                "id": job.id,
+                "status": job.status,
+                "error": job.error,
+                "provider_snapshot": job.provider_snapshot,
+            }
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
@@ -424,6 +488,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         content_type="application/json"
         if data.stage_key in {"novelDraft", "continuity"}
         or (data.stage_key == "source" and project.creation_mode == "original")
+        or (data.stage_key == "outline" and project.creation_mode == "original")
         else "text/markdown",
         content=content,
         metadata_json={"usage": usage},
@@ -557,6 +622,26 @@ def edit_generation_output(
                     expected_episode_seconds=scope["episode_seconds"],
                     expected_aspect_ratio=scope["aspect_ratio"],
                     allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
+                )
+            except (EpisodeSourceMappingError, KeyError) as error:
+                raise HTTPException(422, str(error)) from None
+    if job.stage_key == "outline":
+        project = project_or_404(db, project_id)
+        if project.creation_mode == "original":
+            try:
+                branch, mappings = current_adaptation_branch(db, project)
+                scope = job.input_snapshot.get("scope") or {}
+                if scope.get("branch_id") != branch.id:
+                    raise EpisodeSourceMappingError("改编分支已变化，大纲候选已失效。")
+                parse_adaptation_outline(
+                    data.content,
+                    branch_id=branch.id,
+                    release_id=branch.release_id,
+                    episode_seconds=branch.episode_seconds,
+                    aspect_ratio=branch.aspect_ratio,
+                    mappings=[
+                        {"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings
+                    ],
                 )
             except (EpisodeSourceMappingError, KeyError) as error:
                 raise HTTPException(422, str(error)) from None

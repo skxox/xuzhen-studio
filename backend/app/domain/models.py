@@ -123,6 +123,40 @@ class EpisodeSourceMapping(Timestamped, Base):
     )
 
 
+class AdaptationOutlineRelease(Timestamped, Base):
+    __tablename__ = "adaptation_outline_releases"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    episode_count: Mapped[int] = mapped_column(Integer)
+    creative_thesis: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("branch_id", "revision", name="uq_adaptation_outline_revision"),
+    )
+
+
+class EpisodeAdaptationOutline(Timestamped, Base):
+    __tablename__ = "episode_adaptation_outlines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    outline_release_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_outline_releases.id", ondelete="CASCADE"), index=True
+    )
+    episode_number: Mapped[int] = mapped_column(Integer)
+    source_chapter_ordinals: Mapped[list[int]] = mapped_column(JSON)
+    adaptation_summary: Mapped[str] = mapped_column(Text)
+    emotional_arc: Mapped[str] = mapped_column(Text)
+    ending_hook: Mapped[str] = mapped_column(Text)
+    scenes: Mapped[list[dict]] = mapped_column(JSON)
+    __table_args__ = (
+        UniqueConstraint("outline_release_id", "episode_number", name="uq_outline_episode_number"),
+    )
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session
 
 from ..domain.models import (
     AdaptationBranch,
+    AdaptationOutlineRelease,
     Chapter,
     CommercialBrief,
     CommercialMaterial,
     CreativeBrief,
+    EpisodeAdaptationOutline,
     EpisodeSourceMapping,
     GenerationJob,
     GenerationOutput,
@@ -18,7 +20,9 @@ from ..domain.models import (
 )
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
+    current_adaptation_branch,
     current_release_chapters,
+    parse_adaptation_outline,
     parse_episode_source_mapping,
 )
 from ..services.continuity import (
@@ -62,6 +66,8 @@ def decide_stage(
         raise HTTPException(422, "creative_brief_cannot_be_waived")
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
+    if stage_key in {"source", "outline"} and data.action == "waive":
+        raise HTTPException(422, "source_and_adaptation_outline_cannot_be_waived")
     if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
         raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
     if data.action in {"waive", "reject"} and not data.reason:
@@ -138,6 +144,45 @@ def decide_stage(
             "aspect_ratio": mapping.aspect_ratio,
             "episodes": mapping.episodes,
         }
+    outline_decision = None
+    if stage_key == "outline" and data.action == "accept" and project.creation_mode == "original":
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        candidate_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == candidate_job_id,
+                GenerationJob.project_id == project_id,
+                GenerationJob.stage_key == "outline",
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(
+                select(GenerationOutput).where(
+                    GenerationOutput.project_id == project_id,
+                    GenerationOutput.job_id == candidate_job_id,
+                )
+            )
+            if candidate_job
+            else None
+        )
+        if not candidate_job or not output:
+            raise HTTPException(409, "adaptation_outline_candidate_missing")
+        try:
+            branch, mappings = current_adaptation_branch(db, project)
+            scope = candidate_job.input_snapshot.get("scope") or {}
+            if scope.get("branch_id") != branch.id:
+                raise EpisodeSourceMappingError("候选对应的改编分支已变化。")
+            outline = parse_adaptation_outline(
+                output.content,
+                branch_id=branch.id,
+                release_id=branch.release_id,
+                episode_seconds=branch.episode_seconds,
+                aspect_ratio=branch.aspect_ratio,
+                mappings=[{"chapter_ordinals": mapping.chapter_ordinals} for mapping in mappings],
+            )
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(422, str(error)) from None
+        outline_decision = {"candidate_job_id": candidate_job.id, "outline": outline}
     continuity_decision = None
     release_decision = None
     if stage_key == "continuity" and data.action == "accept":
@@ -379,6 +424,51 @@ def decide_stage(
             "adaptation.branch_created",
             branch.id,
             {**stage.decision, "mapping_count": len(mapping_decision["episodes"])},
+        )
+    elif stage_key == "outline" and data.action == "accept" and outline_decision:
+        branch, _ = current_adaptation_branch(db, project)
+        previous_release = db.scalar(
+            select(AdaptationOutlineRelease)
+            .where(AdaptationOutlineRelease.branch_id == branch.id)
+            .order_by(AdaptationOutlineRelease.revision.desc())
+            .limit(1)
+        )
+        outline = outline_decision["outline"]
+        outline_release = AdaptationOutlineRelease(
+            branch_id=branch.id,
+            revision=(previous_release.revision + 1) if previous_release else 1,
+            job_id=outline_decision["candidate_job_id"],
+            episode_count=outline.episode_count,
+            creative_thesis=outline.creative_thesis,
+        )
+        db.add(outline_release)
+        db.flush()
+        for episode in outline.episodes:
+            db.add(
+                EpisodeAdaptationOutline(
+                    outline_release_id=outline_release.id,
+                    episode_number=episode.episode_number,
+                    source_chapter_ordinals=episode.source_chapter_ordinals,
+                    adaptation_summary=episode.adaptation_summary,
+                    emotional_arc=episode.emotional_arc,
+                    ending_hook=episode.ending_hook,
+                    scenes=[scene.model_dump() for scene in episode.scenes],
+                )
+            )
+        stage.decision = {
+            "action": "accept",
+            "candidate_job_id": outline_decision["candidate_job_id"],
+            "branch_id": branch.id,
+            "outline_release_id": outline_release.id,
+            "outline_revision": outline_release.revision,
+            "episode_count": outline_release.episode_count,
+        }
+        audit(
+            db,
+            project_id,
+            "adaptation.outline_accepted",
+            outline_release.id,
+            stage.decision,
         )
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}

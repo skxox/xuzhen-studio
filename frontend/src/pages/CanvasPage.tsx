@@ -280,7 +280,9 @@ function StageInspector({
   const route =
     stage.stage_key === 'source' && project?.creation_mode === 'original'
       ? '/writing/adaptation'
-      : (stageRoutes[stage.stage_key] ?? '/');
+      : stage.stage_key === 'outline' && project?.creation_mode === 'original'
+        ? '/writing/adaptation-outline'
+        : (stageRoutes[stage.stage_key] ?? '/');
   const status = statusLabel(stage.status);
   const params = job?.input_snapshot.parameters;
   return (

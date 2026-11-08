@@ -2,8 +2,15 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..domain.contracts import EpisodeSourceMappingPlanCandidate
-from ..domain.models import Chapter, ManuscriptRelease, Project, StageState
+from ..domain.contracts import AdaptationOutlineCandidate, EpisodeSourceMappingPlanCandidate
+from ..domain.models import (
+    AdaptationBranch,
+    Chapter,
+    EpisodeSourceMapping,
+    ManuscriptRelease,
+    Project,
+    StageState,
+)
 
 
 class EpisodeSourceMappingError(ValueError):
@@ -52,6 +59,40 @@ def current_release_chapters(
     return release, chapters
 
 
+def current_adaptation_branch(
+    db: Session, project: Project
+) -> tuple[AdaptationBranch, list[EpisodeSourceMapping]]:
+    stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project.id,
+            StageState.stage_key == "source",
+        )
+    )
+    branch_id = (
+        (stage.decision or {}).get("branch_id") if stage and stage.status == "accepted" else None
+    )
+    branch = db.scalar(
+        select(AdaptationBranch).where(
+            AdaptationBranch.id == branch_id,
+            AdaptationBranch.project_id == project.id,
+        )
+    )
+    if not branch:
+        raise EpisodeSourceMappingError("必须先验收当前改编分支。")
+    _, chapters = current_release_chapters(db, project, branch.release_id)
+    mappings = db.scalars(
+        select(EpisodeSourceMapping)
+        .where(EpisodeSourceMapping.branch_id == branch.id)
+        .order_by(EpisodeSourceMapping.episode_number)
+    ).all()
+    if len(mappings) != branch.episode_count:
+        raise EpisodeSourceMappingError("当前改编分支的逐集映射记录不完整。")
+    allowed_ordinals = {chapter.ordinal for chapter in chapters}
+    if any(not set(mapping.chapter_ordinals).issubset(allowed_ordinals) for mapping in mappings):
+        raise EpisodeSourceMappingError("当前改编分支包含不属于锁版范围的章节。")
+    return branch, mappings
+
+
 def parse_episode_source_mapping(
     content: str,
     *,
@@ -73,6 +114,8 @@ def parse_episode_source_mapping(
         or plan.aspect_ratio != expected_aspect_ratio
     ):
         raise EpisodeSourceMappingError("映射候选的集数或制作参数与本次任务不一致。")
+    if not allowed_chapter_ordinals:
+        raise EpisodeSourceMappingError("锁版中没有可映射章节。")
     if len(plan.episodes) != expected_episode_count:
         raise EpisodeSourceMappingError("映射行数必须与目标集数完全一致。")
     expected_episode_numbers = list(range(1, expected_episode_count + 1))
@@ -94,3 +137,68 @@ def parse_episode_source_mapping(
             raise EpisodeSourceMappingError("每集章节必须连续，且目标集必须保持原文顺序。")
         next_ordinal = ordered_ordinals[-1] + 1
     return plan
+
+
+def parse_adaptation_outline(
+    content: str,
+    *,
+    branch_id: str,
+    release_id: str,
+    episode_seconds: int,
+    aspect_ratio: str,
+    mappings: list[dict],
+) -> AdaptationOutlineCandidate:
+    try:
+        outline = AdaptationOutlineCandidate.model_validate_json(content)
+    except ValidationError as error:
+        raise EpisodeSourceMappingError("视频改编大纲格式无效，请检查候选字段。") from error
+    expected_numbers = list(range(1, len(mappings) + 1))
+    if (
+        outline.branch_id != branch_id
+        or outline.release_id != release_id
+        or outline.episode_count != len(mappings)
+        or outline.episode_seconds != episode_seconds
+        or outline.aspect_ratio != aspect_ratio
+    ):
+        raise EpisodeSourceMappingError("大纲候选引用的改编分支或制作参数已变化。")
+    if [episode.episode_number for episode in outline.episodes] != expected_numbers:
+        raise EpisodeSourceMappingError("大纲必须逐集覆盖当前分支，集序不得缺失或重复。")
+    for episode, mapping in zip(outline.episodes, mappings, strict=True):
+        allowed_sources = set(mapping["chapter_ordinals"])
+        if episode.source_chapter_ordinals != mapping["chapter_ordinals"]:
+            raise EpisodeSourceMappingError(
+                f"第 {episode.episode_number} 集的大纲来源必须与已接受映射一致。"
+            )
+        scene_numbers = [scene.scene_number for scene in episode.scenes]
+        if scene_numbers != list(range(1, len(episode.scenes) + 1)):
+            raise EpisodeSourceMappingError(f"第 {episode.episode_number} 集的场次序号必须连续。")
+        total_seconds = 0
+        for scene in episode.scenes:
+            total_seconds += scene.estimated_seconds
+            if scene.source_chapter_ordinals != sorted(set(scene.source_chapter_ordinals)):
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场的章节来源需去重"
+                    "并按原文顺序排列。"
+                )
+            if not set(scene.source_chapter_ordinals).issubset(allowed_sources):
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集含有超出映射范围的章节引用。"
+                )
+            if not scene.source_chapter_ordinals and not scene.is_adaptation_addition:
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集存在无原文出处且未标记新增的场次。"
+                )
+            if scene.source_chapter_ordinals and scene.is_adaptation_addition:
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场标记为纯新增，"
+                    "却仍引用了原文。"
+                )
+            if [beat.beat_number for beat in scene.beats] != list(range(1, len(scene.beats) + 1)):
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场的节拍序号必须连续。"
+                )
+        if total_seconds > episode_seconds:
+            raise EpisodeSourceMappingError(
+                f"第 {episode.episode_number} 集场次时长预算超过单集目标时长。"
+            )
+    return outline

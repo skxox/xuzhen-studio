@@ -105,3 +105,5 @@ uv run uvicorn app.main:app --reload
 ## 当前不具备的生产条件
 
 当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、媒体安全扫描和分布式任务恢复。视频仅接入特定 OpenAI-compatible 异步 API 子集，语音仅接入 `/v1/audio/speech` 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。FFmpeg 母版合成要求系统安装带 `libx264`、`aac`、`mov_text` 编码器的 FFmpeg 和配套 FFprobe；合成前后的请求时长差与轨道元数据会自动检查，但对白定位仍基于估算 cue，须经人工审片。长片合成和扫描仍在 API 请求中同步执行。
+
+当前可完整走通的生产路径仅为 `original`（AI 原创小说）项目。`adaptation`（导入小说）与 `commercial`（商品素材）已支持输入管理和各自的首个来源/简报门禁，但其后续视频生产链路尚未完成。为避免空阶段被错误标为已验收，服务端会在启动或验收后续视频生产阶段时返回 `409 video_pipeline_mode_not_supported`；对应模式需完成来源锁版、分集映射和各阶段候选校验/物化后再开放。

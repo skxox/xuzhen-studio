@@ -11,6 +11,7 @@ from ..domain.models import (
     StageState,
 )
 from ..services.keyframe_plan import KeyframePlanError, current_shot_plan_release, required_shots
+from ..services.workflow_policy import StageDecisionPolicyError, validate_stage_mode
 from .common import audit, get_db, invalidate_downstream_stages, project_or_404, stage_dependencies
 
 router = APIRouter()
@@ -26,6 +27,10 @@ def start_stage(project_id: str, stage_key: str, db: Session = Depends(get_db)):
     )
     if not stage:
         raise HTTPException(404, "stage_not_found")
+    try:
+        validate_stage_mode(project, stage_key)
+    except StageDecisionPolicyError as error:
+        raise HTTPException(error.status_code, error.detail) from None
     if stage.status not in {"ready", "accepted", "waived", "stale", "failed", "blocked"}:
         raise HTTPException(409, f"stage_cannot_start_from:{stage.status}")
     deps = stage_dependencies(project, stage_key)

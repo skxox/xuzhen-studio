@@ -15,12 +15,37 @@ ALLOWED = {
     "failed": {"ready", "running", "stale"},
 }
 
+VIDEO_PRODUCTION_STAGES = {
+    "outline",
+    "characters",
+    "art",
+    "script",
+    "voice",
+    "shotDesign",
+    "keyframes",
+    "video",
+    "post",
+    "delivery",
+}
+
 
 class StageDecisionPolicyError(Exception):
     def __init__(self, status_code: int, detail: object):
         self.status_code = status_code
         self.detail = detail
         super().__init__(str(detail))
+
+
+def validate_stage_mode(project: Project, stage_key: str) -> None:
+    if project.creation_mode != "original" and stage_key in VIDEO_PRODUCTION_STAGES:
+        raise StageDecisionPolicyError(
+            409,
+            {
+                "code": "video_pipeline_mode_not_supported",
+                "creation_mode": project.creation_mode,
+                "stage_key": stage_key,
+            },
+        )
 
 
 def stage_dependencies(project: Project, stage_key: str) -> tuple[str, ...]:
@@ -64,6 +89,7 @@ def validate_stage_decision(
     reason: str | None,
     risk_ack: bool,
 ) -> str:
+    validate_stage_mode(project, stage_key)
     if stage.status != "needs_review":
         raise StageDecisionPolicyError(409, "stage_must_be_in_needs_review_before_decision")
     if stage_key in {"creativeBrief", "commercialBrief"} and action == "waive":

@@ -71,7 +71,7 @@ DEPENDENCIES = {
     "commercialBrief": (),
     "storyBible": ("creativeBrief",),
     "novelOutline": ("storyBible",),
-    "literaryCharacters": ("storyBible",),
+    "literaryCharacters": ("storyBible", "novelOutline"),
     "novelDraft": ("novelOutline", "literaryCharacters"),
     "continuity": ("novelDraft",),
     "manuscriptRelease": ("continuity",),

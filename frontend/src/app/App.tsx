@@ -38,6 +38,11 @@ import '../styles/workspace.css';
 const CanvasPage = lazy(() =>
   import('../pages/CanvasPage').then(({ CanvasPage: page }) => ({ default: page })),
 );
+const OriginalLiteraryCharactersWorkspace = lazy(() =>
+  import('../pages/OriginalLiteraryCharactersWorkspace').then(
+    ({ OriginalLiteraryCharactersWorkspace: page }) => ({ default: page }),
+  ),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -401,6 +406,10 @@ function AppShell() {
                 element={<SourcePage key={project?.id ?? 'demo'} project={project} />}
               />
               <Route path="/writing" element={<WritingPage project={project} />} />
+              <Route
+                path="/writing/characters"
+                element={<OriginalLiteraryCharactersWorkspace project={project} />}
+              />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />
               <Route path="/assets" element={<AssetsPage project={project} />} />

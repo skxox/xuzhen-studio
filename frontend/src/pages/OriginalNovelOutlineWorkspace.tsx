@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ArrowRight, BookOpen, Check, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { Project } from '../lib/types';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
@@ -9,6 +10,7 @@ import { Field, SelectInput, TextArea, TextInput } from '../components/ui/Field'
 import { PageHeading, Panel } from '../components/ui/Panel';
 
 export function OriginalNovelOutlineWorkspace({ project }: { project: Project }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [consent, setConsent] = useState(false);
@@ -393,9 +395,18 @@ export function OriginalNovelOutlineWorkspace({ project }: { project: Project })
             </div>
           )}
           {outlineStage?.status === 'accepted' && (
-            <div className="inline-success">
-              <Check size={15} />
-              大纲已验收。进入章节写作前，还需验收文学角色圣经。
+            <div>
+              <div className="inline-success">
+                <Check size={15} />
+                大纲已验收。进入章节写作前，还需验收文学角色圣经。
+              </div>
+              <Button
+                variant="primary"
+                icon={<ArrowRight size={14} />}
+                onClick={() => navigate('/writing/characters')}
+              >
+                进入文学角色圣经
+              </Button>
             </div>
           )}
           {outlineStage?.status === 'stale' && (

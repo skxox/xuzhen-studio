@@ -5,11 +5,20 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .media_quality import (
+    MediaProbeError,
+    ffprobe_available,
+    inspect_master,
+    probe_audio_duration,
+)
+
 MAX_MASTER_BYTES = 2_000_000_000
 MAX_PACKAGE_BYTES = 1_000_000_000
+MAX_DIALOGUE_TEMPO = 1.2
 
 
 class MasterRenderError(ValueError):
@@ -48,19 +57,6 @@ def ffmpeg_available(binary: str) -> bool:
         and encoders.returncode == 0
         and all(name in available_encoders for name in ("libx264", "aac", "mov_text"))
     )
-
-
-def ffprobe_available(binary: str) -> bool:
-    executable = shutil.which(binary)
-    if not executable:
-        return False
-    try:
-        result = subprocess.run(
-            [executable, "-version"], capture_output=True, timeout=5, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 def render_master(
@@ -102,6 +98,12 @@ def render_master(
         duration = sum(_positive_number(shot.get("duration_seconds_requested")) for shot in shots)
         if duration <= 0 or duration > 60 * 60:
             raise MasterRenderError("edit_package_duration_out_of_range")
+        try:
+            audio, dialogue_fit = _fit_audio_to_subtitle_windows(audio, audio_paths, ffprobe_binary)
+        except MediaProbeError as error:
+            raise MasterRenderError(str(error)) from error
+        if any(clip["end_ms"] > duration * 1000 for clip in audio):
+            raise MasterRenderError("dialogue_audio_timing_outside_timeline")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         _run_ffmpeg(
             binary=ffmpeg_binary,
@@ -135,6 +137,10 @@ def render_master(
             expected_width=width,
             expected_height=height,
         )
+        quality_report["dialogue_audio_fit"] = dialogue_fit
+    except MediaProbeError as error:
+        output_path.unlink(missing_ok=True)
+        raise MasterRenderError(str(error)) from error
     except MasterRenderError:
         output_path.unlink(missing_ok=True)
         raise
@@ -146,102 +152,6 @@ def render_master(
         height,
         quality_report,
     )
-
-
-def inspect_master(
-    *,
-    path: Path,
-    ffprobe_binary: str,
-    expected_duration: float,
-    expected_width: int,
-    expected_height: int,
-) -> dict:
-    executable = shutil.which(ffprobe_binary)
-    if not executable:
-        raise MasterRenderError("ffprobe_unavailable")
-    command = [
-        executable,
-        "-v",
-        "error",
-        "-count_packets",
-        "-show_entries",
-        "format=format_name,duration:stream=codec_type,codec_name,width,height,duration,nb_read_packets",
-        "-of",
-        "json",
-        str(path),
-    ]
-    try:
-        result = subprocess.run(command, capture_output=True, timeout=300, check=False)
-    except subprocess.TimeoutExpired as error:
-        raise MasterRenderError("ffprobe_quality_check_timed_out") from error
-    except OSError as error:
-        raise MasterRenderError("ffprobe_execution_failed") from error
-    if result.returncode != 0:
-        raise MasterRenderError("ffprobe_quality_check_failed")
-    try:
-        payload = json.loads(result.stdout)
-        streams = payload["streams"]
-        container = payload["format"]
-        actual_duration = float(container["duration"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        raise MasterRenderError("ffprobe_metadata_invalid") from error
-    if not isinstance(streams, list) or not isinstance(container, dict):
-        raise MasterRenderError("ffprobe_metadata_invalid")
-    if not all(isinstance(stream, dict) for stream in streams):
-        raise MasterRenderError("ffprobe_metadata_invalid")
-    if "mp4" not in container.get("format_name", "").split(","):
-        raise MasterRenderError("master_container_is_not_mp4")
-    videos = [stream for stream in streams if stream.get("codec_type") == "video"]
-    audios = [stream for stream in streams if stream.get("codec_type") == "audio"]
-    subtitles = [stream for stream in streams if stream.get("codec_type") == "subtitle"]
-    if len(videos) != 1 or len(audios) != 1 or len(subtitles) != 1:
-        raise MasterRenderError("master_required_streams_invalid")
-    video, audio, subtitle = videos[0], audios[0], subtitles[0]
-    if (
-        video.get("codec_name") != "h264"
-        or video.get("width") != expected_width
-        or video.get("height") != expected_height
-    ):
-        raise MasterRenderError("master_video_stream_invalid")
-    if audio.get("codec_name") != "aac" or subtitle.get("codec_name") != "mov_text":
-        raise MasterRenderError("master_audio_or_subtitle_stream_invalid")
-    if any(_packet_count(stream.get("nb_read_packets")) < 1 for stream in (video, audio, subtitle)):
-        raise MasterRenderError("master_stream_contains_no_packets")
-    video_duration = _stream_duration(video, actual_duration)
-    audio_duration = _stream_duration(audio, actual_duration)
-    duration_tolerance = max(0.5, expected_duration * 0.01)
-    duration_delta = abs(video_duration - expected_duration)
-    if any(
-        duration <= 0 or abs(duration - expected_duration) > duration_tolerance
-        for duration in (actual_duration, video_duration, audio_duration)
-    ):
-        raise MasterRenderError("master_duration_outside_tolerance")
-    if abs(video_duration - audio_duration) > duration_tolerance:
-        raise MasterRenderError("master_audio_video_duration_mismatch")
-    return {
-        "passed": True,
-        "container": "mp4",
-        "actual_duration_seconds": video_duration,
-        "container_duration_seconds": actual_duration,
-        "audio_duration_seconds": audio_duration,
-        "expected_duration_seconds": expected_duration,
-        "duration_delta_seconds": round(duration_delta, 3),
-        "duration_tolerance_seconds": round(max(0.5, expected_duration * 0.01), 3),
-        "video": {
-            "codec": video["codec_name"],
-            "width": video["width"],
-            "height": video["height"],
-            "packets_read": _packet_count(video["nb_read_packets"]),
-        },
-        "audio": {
-            "codec": audio["codec_name"],
-            "packets_read": _packet_count(audio["nb_read_packets"]),
-        },
-        "subtitle": {
-            "codec": subtitle["codec_name"],
-            "packets_read": _packet_count(subtitle["nb_read_packets"]),
-        },
-    }
 
 
 def _extract_package(package_path: Path, work_dir: Path) -> dict:
@@ -322,11 +232,20 @@ def _run_ffmpeg(
     audio_base = len(video_paths)
     for index, clip in enumerate(audio_clips):
         start_ms = clip.get("start_ms")
-        if type(start_ms) is not int or start_ms < 0 or start_ms > duration * 1000:
+        tempo = clip.get("tempo", 1.0)
+        if (
+            type(start_ms) is not int
+            or start_ms < 0
+            or start_ms > duration * 1000
+            or not isinstance(tempo, (int, float))
+            or isinstance(tempo, bool)
+            or not 1 <= tempo <= 1.2
+        ):
             raise MasterRenderError("dialogue_audio_timing_invalid")
         label = f"a{index}"
         filters.append(
             f"[{audio_base + index}:a:0]asetpts=PTS-STARTPTS,aresample=48000,"
+            f"atempo={tempo:.6f},"
             f"adelay=delays={start_ms}:all=1[{label}]"
         )
         audio_labels.append(f"[{label}]")
@@ -400,47 +319,75 @@ def _positive_number(value: object) -> float:
     return float(value)
 
 
-def _packet_count(value: object) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _stream_duration(stream: dict, fallback: float) -> float:
-    try:
-        return float(stream.get("duration", fallback))
-    except (TypeError, ValueError):
-        return fallback
-
-
 def _align_audio_to_subtitles(audio_clips: list, subtitle_path: Path) -> list[dict]:
     try:
         subtitle = subtitle_path.read_text(encoding="utf-8-sig")
     except OSError as error:
         raise MasterRenderError("edit_package_subtitles_unreadable") from error
-    cue_starts = []
+    cue_windows = []
     for block in re.split(r"\r?\n\s*\r?\n", subtitle.strip()):
         lines = block.splitlines()
         if len(lines) < 3 or not lines[0].strip().isdigit():
             raise MasterRenderError("edit_package_subtitles_invalid")
         match = re.fullmatch(
-            r"(\d{2,}):(\d{2}):(\d{2}),(\d{3})\s+-->\s+.+",
+            r"(\d{2,}):(\d{2}):(\d{2}),(\d{3})\s+-->\s+"
+            r"(\d{2,}):(\d{2}):(\d{2}),(\d{3})",
             lines[1].strip(),
         )
         if not match:
             raise MasterRenderError("edit_package_subtitles_invalid")
-        hours, minutes, seconds, millis = (int(value) for value in match.groups())
-        if minutes > 59 or seconds > 59:
+        values = [int(value) for value in match.groups()]
+        start = _timestamp_milliseconds(values[:4])
+        end = _timestamp_milliseconds(values[4:])
+        if end <= start:
             raise MasterRenderError("edit_package_subtitles_invalid")
-        cue_starts.append(((hours * 60 + minutes) * 60 + seconds) * 1000 + millis)
+        cue_windows.append((start, end))
     aligned = []
     for clip in audio_clips:
         cue_index = clip.get("subtitle_index")
-        if type(cue_index) is not int or not 1 <= cue_index <= len(cue_starts):
+        if type(cue_index) is not int or not 1 <= cue_index <= len(cue_windows):
             raise MasterRenderError("dialogue_audio_subtitle_mapping_missing")
-        aligned.append({**clip, "start_ms": cue_starts[cue_index - 1]})
+        start_ms, end_ms = cue_windows[cue_index - 1]
+        aligned.append({**clip, "start_ms": start_ms, "end_ms": end_ms})
     return aligned
+
+
+def _fit_audio_to_subtitle_windows(
+    clips: list[dict], audio_paths: list[Path], ffprobe_binary: str
+) -> tuple[list[dict], dict]:
+    if len(clips) != len(audio_paths):
+        raise MasterRenderError("dialogue_audio_mapping_invalid")
+    with ThreadPoolExecutor(max_workers=min(8, len(audio_paths))) as executor:
+        durations = list(
+            executor.map(lambda path: probe_audio_duration(path, ffprobe_binary), audio_paths)
+        )
+    fitted = []
+    adjusted_count = 0
+    max_tempo = 1.0
+    for clip, duration in zip(clips, durations, strict=True):
+        slot_ms = clip["end_ms"] - clip["start_ms"]
+        if slot_ms <= 0:
+            raise MasterRenderError("dialogue_audio_timing_invalid")
+        tempo = max(1.0, duration / (slot_ms / 1000))
+        if tempo > MAX_DIALOGUE_TEMPO:
+            raise MasterRenderError("dialogue_audio_exceeds_subtitle_slot")
+        adjusted_count += tempo > 1.001
+        max_tempo = max(max_tempo, tempo)
+        fitted.append({**clip, "source_duration_seconds": duration, "tempo": tempo})
+    return fitted, {
+        "passed": True,
+        "clip_count": len(fitted),
+        "speed_adjusted_count": adjusted_count,
+        "max_tempo": round(max_tempo, 3),
+        "tempo_limit": MAX_DIALOGUE_TEMPO,
+    }
+
+
+def _timestamp_milliseconds(parts: list[int]) -> int:
+    hours, minutes, seconds, millis = parts
+    if minutes > 59 or seconds > 59:
+        raise MasterRenderError("edit_package_subtitles_invalid")
+    return (((hours * 60 + minutes) * 60) + seconds) * 1000 + millis
 
 
 def _sha256(path: Path) -> str:

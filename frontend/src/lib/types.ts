@@ -311,6 +311,13 @@ export interface MasterQualityReport {
   video: { codec: string; width: number; height: number; packets_read: number };
   audio: { codec: string; packets_read: number };
   subtitle: { codec: string; packets_read: number };
+  dialogue_audio_fit: {
+    passed: boolean;
+    clip_count: number;
+    speed_adjusted_count: number;
+    max_tempo: number;
+    tempo_limit: number;
+  };
 }
 
 export interface ApiHealth {

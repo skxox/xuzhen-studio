@@ -419,6 +419,9 @@ def decide_stage(
         quality_report = (delivery_master.source_snapshot or {}).get("quality_report")
         if not isinstance(quality_report, dict) or quality_report.get("passed") is not True:
             raise HTTPException(409, "delivery_master_quality_check_required")
+        dialogue_fit = quality_report.get("dialogue_audio_fit")
+        if not isinstance(dialogue_fit, dict) or dialogue_fit.get("passed") is not True:
+            raise HTTPException(409, "delivery_master_dialogue_fit_check_required")
         master_path = (settings.storage_dir / delivery_master.storage_key).resolve()
         if settings.storage_dir.resolve() not in master_path.parents or not master_path.is_file():
             raise HTTPException(409, "delivery_master_file_missing")

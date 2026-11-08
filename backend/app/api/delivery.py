@@ -10,9 +10,9 @@ from ..domain.models import DeliveryMaster, EditPackage, StageState
 from ..services.ffmpeg_master import (
     MasterRenderError,
     ffmpeg_available,
-    ffprobe_available,
     render_master,
 )
+from ..services.media_quality import ffprobe_available
 from .common import audit, get_db, project_or_404
 
 router = APIRouter()

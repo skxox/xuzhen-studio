@@ -80,7 +80,8 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
       </div>
       <p>
         按镜头顺序拼接视频，将逐句配音按字幕时间位置混合，并嵌入可切换的中文字幕轨。FFprobe
-        会检查容器、视频/音频/字幕轨、数据包和实际时长；通过后仍需人工审片。
+        会检查容器、视频/音频/字幕轨、数据包和实测时长。配音最多加速 20%
+        以适配字幕窗口；超出时会阻止合成。
       </p>
       {!runtimeQuery.isLoading && !runtimeQuery.data?.master_render_available && (
         <p className="form-error">{runtimeQuery.data?.message ?? 'FFmpeg 运行状态检查失败。'}</p>
@@ -111,6 +112,16 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
               自动检查通过 · H.264 {qualityReport.video.packets_read} 包 · AAC{' '}
               {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read} 条
               · 时长偏差 {qualityReport.duration_delta_seconds.toFixed(2)} 秒
+              {qualityReport.dialogue_audio_fit?.passed ? (
+                <>
+                  {' '}
+                  · 配音加速 {qualityReport.dialogue_audio_fit.speed_adjusted_count}/
+                  {qualityReport.dialogue_audio_fit.clip_count} 句，最高{' '}
+                  {qualityReport.dialogue_audio_fit.max_tempo.toFixed(2)}×
+                </>
+              ) : (
+                ' · 缺少对白时间适配检查，请重新合成'
+              )}
             </p>
           ) : (
             <p className="form-error">该母版没有新版 FFprobe 质量报告，请退回并重新合成。</p>
@@ -134,14 +145,25 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
               variant="primary"
               icon={<Check size={15} />}
               onClick={() => decide.mutate('accept')}
-              disabled={decide.isPending || !qualityReport?.passed}
+              disabled={
+                decide.isPending ||
+                !qualityReport?.passed ||
+                !qualityReport.dialogue_audio_fit?.passed
+              }
             >
               验收最终母版
             </Button>
           </div>
         </div>
       )}
-      {error && <p className="form-error">{error.message}</p>}
+      {error?.message.includes('dialogue_audio_exceeds_subtitle_slot') ? (
+        <p className="form-error">
+          有对白音频比对应字幕窗口长超过 20%，已阻止合成以免明显变速或截断。可{' '}
+          <Link to="/writing/voice">重新生成该句配音</Link>，或先修改字幕时间窗再重新生成剪辑包。
+        </p>
+      ) : (
+        error && <p className="form-error">{readableError(error)}</p>
+      )}
       <div className="workspace-actions">
         <Button
           variant="primary"
@@ -181,4 +203,13 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
       )}
     </Panel>
   );
+}
+
+function readableError(error: Error) {
+  try {
+    const payload = JSON.parse(error.message) as { detail?: string };
+    return payload.detail ?? error.message;
+  } catch {
+    return error.message;
+  }
 }

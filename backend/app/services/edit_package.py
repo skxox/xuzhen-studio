@@ -101,9 +101,15 @@ def build_edit_package(
                 if len(slots) != len(dialogue_lines):
                     raise EditPackageError("镜头时长不足以容纳关联对白，无法建立配音时间线。")
                 for line, (start, end, speaker, text) in zip(dialogue_lines, slots, strict=True):
-                    subtitles.append((shot_start + start, shot_start + end, speaker, text))
                     dialogue_key = (episode_number, scene_number, line["dialogue_number"])
-                    dialogue_offsets.setdefault(dialogue_key, (shot_start + start, len(subtitles)))
+                    if dialogue_key in dialogue_offsets:
+                        raise EditPackageError(
+                            f"第 {episode_number} 集第 {scene_number} 场第 "
+                            f"{line['dialogue_number']} 句对白被多个镜头重复引用。"
+                            "请将一条完整对白只关联到一个镜头，再重新锁定分镜。"
+                        )
+                    subtitles.append((shot_start + start, shot_start + end, speaker, text))
+                    dialogue_offsets[dialogue_key] = (shot_start + start, len(subtitles))
                 manifest_shots.append(
                     {
                         "order": len(manifest_shots) + 1,

@@ -13,6 +13,7 @@ from ..domain.models import (
     ServiceProfile,
     StageState,
 )
+from ..services.continuity import ContinuityReportError, parse_continuity_report
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
 from .common import (
@@ -71,6 +72,39 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         highest_ordinal = max(existing_ordinals, default=0)
         if ordinal > highest_ordinal + 1:
             raise HTTPException(422, "novel_chapter_sequence_cannot_skip_ahead")
+    if data.stage_key == "continuity":
+        chapter_start = data.scope.get("chapter_start")
+        chapter_end = data.scope.get("chapter_end")
+        if project.creation_mode != "original":
+            raise HTTPException(422, "continuity_report_requires_original_project")
+        if (
+            type(chapter_start) is not int
+            or type(chapter_end) is not int
+            or chapter_start < 1
+            or chapter_end < chapter_start
+            or chapter_end - chapter_start >= 20
+        ):
+            raise HTTPException(422, "continuity_scope_must_include_one_to_twenty_chapters")
+        latest_chapters = _latest_chapters(db, project_id)
+        context_ordinal = chapter_start - 1 if chapter_start > 1 else None
+        chapter_texts = {
+            ordinal: latest_chapters[ordinal].body
+            for ordinal in range(chapter_start, chapter_end + 1)
+            if ordinal in latest_chapters
+        }
+        if context_ordinal is not None:
+            if context_ordinal not in latest_chapters:
+                raise HTTPException(422, "continuity_scope_requires_preceding_chapter_context")
+            chapter_texts[context_ordinal] = latest_chapters[context_ordinal].body
+        if set(chapter_texts) != set(range(chapter_start, chapter_end + 1)):
+            raise HTTPException(422, "continuity_scope_chapters_must_be_contiguous")
+        chapter_ids = {
+            latest_chapters[ordinal].id for ordinal in range(chapter_start, chapter_end + 1)
+        }
+        if context_ordinal is not None:
+            chapter_ids.add(latest_chapters[context_ordinal].id)
+        if not chapter_ids.issubset(set(data.input_refs)):
+            raise HTTPException(409, "continuity_scope_chapter_versions_changed")
     if not data.data_authorized:
         raise HTTPException(422, "model_data_processing_consent_required")
     supported = data.modality == "text" and profile.adapter_id == "openai-compatible-chat"
@@ -287,6 +321,32 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "error": job.error,
                 "provider_snapshot": job.provider_snapshot,
             }
+    if data.stage_key == "continuity":
+        try:
+            _validate_continuity_output(db, project_id, job, content, allow_review_decisions=False)
+        except ContinuityReportError as error:
+            stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
+                )
+            )
+            job.status = "failed"
+            job.error = {"code": "invalid_continuity_report", "message": str(error)}
+            if (
+                stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+            ):
+                stage.status = "failed"
+                stage.version += 1
+            audit(db, project_id, "job.failed", job.id, job.error)
+            db.commit()
+            return {
+                "id": job.id,
+                "status": job.status,
+                "error": job.error,
+                "provider_snapshot": job.provider_snapshot,
+            }
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
@@ -295,7 +355,9 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
     output = GenerationOutput(
         project_id=project_id,
         job_id=job.id,
-        content_type="application/json" if data.stage_key == "novelDraft" else "text/markdown",
+        content_type="application/json"
+        if data.stage_key in {"novelDraft", "continuity"}
+        else "text/markdown",
         content=content,
         metadata_json={"usage": usage},
     )
@@ -406,6 +468,13 @@ def edit_generation_output(
             parse_chapter_candidate(data.content, expected_ordinal)
         except NovelDraftCandidateError as error:
             raise HTTPException(422, str(error)) from None
+    if job.stage_key == "continuity":
+        try:
+            _validate_continuity_output(
+                db, project_id, job, data.content, allow_review_decisions=True
+            )
+        except ContinuityReportError as error:
+            raise HTTPException(422, str(error)) from None
     db.add(
         GenerationOutputVersion(
             output_id=output.id,
@@ -475,6 +544,60 @@ def safe_generation_output(item: GenerationOutput) -> dict:
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
+
+
+def _latest_chapters(db: Session, project_id: str) -> dict[int, Chapter]:
+    items = db.scalars(
+        select(Chapter)
+        .where(Chapter.project_id == project_id)
+        .order_by(Chapter.ordinal, Chapter.version.desc())
+    ).all()
+    latest: dict[int, Chapter] = {}
+    for item in items:
+        latest.setdefault(item.ordinal, item)
+    return latest
+
+
+def _validate_continuity_output(
+    db: Session,
+    project_id: str,
+    job: GenerationJob,
+    content: str,
+    *,
+    allow_review_decisions: bool,
+):
+    scope = job.input_snapshot.get("scope") or {}
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if type(chapter_start) is not int or type(chapter_end) is not int:
+        raise ContinuityReportError("审校任务缺少有效的章节范围。")
+    latest_chapters = _latest_chapters(db, project_id)
+    chapter_texts = {
+        ordinal: latest_chapters[ordinal].body
+        for ordinal in range(chapter_start, chapter_end + 1)
+        if ordinal in latest_chapters
+    }
+    context_ordinal = scope.get("context_chapter")
+    if type(context_ordinal) is int:
+        if context_ordinal not in latest_chapters:
+            raise ContinuityReportError("审校上下文章节版本已变化。")
+        chapter_texts[context_ordinal] = latest_chapters[context_ordinal].body
+    latest_ids = {
+        latest_chapters[ordinal].id
+        for ordinal in range(chapter_start, chapter_end + 1)
+        if ordinal in latest_chapters
+    }
+    if type(context_ordinal) is int and context_ordinal in latest_chapters:
+        latest_ids.add(latest_chapters[context_ordinal].id)
+    if not latest_ids.issubset(set(job.input_snapshot.get("input_refs", []))):
+        raise ContinuityReportError("审校期间章节版本已变化，请重新运行审校。")
+    return parse_continuity_report(
+        content,
+        chapter_start,
+        chapter_end,
+        chapter_texts,
+        allow_review_decisions=allow_review_decisions,
+    )
 
 
 def replay_generation_job(db: Session, job: GenerationJob, data: JobCreate) -> dict:

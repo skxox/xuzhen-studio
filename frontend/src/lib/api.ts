@@ -149,10 +149,16 @@ export const api = {
       `/projects/${projectId}/stages/${stage}/submit-review`,
       { method: 'POST' },
     ),
-  decideStage: (projectId: string, stage: string, action: 'accept' | 'reject', reason?: string) =>
+  decideStage: (
+    projectId: string,
+    stage: string,
+    action: 'accept' | 'reject',
+    reason?: string,
+    risk_ack = false,
+  ) =>
     request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(
       `/projects/${projectId}/stages/${stage}/decision`,
-      { method: 'POST', body: JSON.stringify({ action, reason }) },
+      { method: 'POST', body: JSON.stringify({ action, reason, risk_ack }) },
     ),
   uploadChapters: async (projectId: string, file: File) => {
     const form = new FormData();

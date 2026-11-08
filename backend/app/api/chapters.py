@@ -56,10 +56,11 @@ def add_chapter(project_id: str, data: ChapterCreate, db: Session = Depends(get_
             StageState.project_id == project_id, StageState.stage_key == "source"
         )
     )
-    if src:
+    if src and project.creation_mode == "adaptation":
         src.status = "needs_review"
         src.version += 1
         invalidate_downstream_stages(db, project, "source")
+    _invalidate_original_novel_review(db, project)
     audit(
         db,
         project_id,
@@ -136,10 +137,11 @@ async def upload_text(project_id: str, file: UploadFile = File(...), db: Session
             StageState.project_id == project_id, StageState.stage_key == "source"
         )
     )
-    if stage:
+    if stage and project.creation_mode == "adaptation":
         stage.status = "needs_review"
         stage.version += 1
         invalidate_downstream_stages(db, project, "source")
+    _invalidate_original_novel_review(db, project)
     audit(
         db,
         project_id,
@@ -214,12 +216,13 @@ def revise_chapter(
             StageState.project_id == project_id, StageState.stage_key == "source"
         )
     )
-    if source:
+    if source and project.creation_mode == "adaptation":
         source.status = "needs_review"
         source.version += 1
         source.stale = False
         source.decision = {}
         invalidate_downstream_stages(db, project, "source")
+    _invalidate_original_novel_review(db, project)
     audit(
         db,
         project_id,
@@ -308,12 +311,13 @@ def restore_chapter_version(
             StageState.project_id == project_id, StageState.stage_key == "source"
         )
     )
-    if source:
+    if source and project.creation_mode == "adaptation":
         source.status = "needs_review"
         source.version += 1
         source.stale = False
         source.decision = {}
         invalidate_downstream_stages(db, project, "source")
+    _invalidate_original_novel_review(db, project)
     audit(
         db,
         project_id,
@@ -336,6 +340,11 @@ def restore_chapter_version(
         "char_count": len(revision.body),
         "version": revision.version,
     }
+
+
+def _invalidate_original_novel_review(db: Session, project) -> None:
+    if project.creation_mode == "original":
+        invalidate_downstream_stages(db, project, "novelDraft")
 
 
 @router.get("/projects/{project_id}/character-references")

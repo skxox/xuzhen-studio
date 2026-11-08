@@ -81,8 +81,8 @@ def update_project_rights(
     project_id: str, data: ProjectRightsUpdate, db: Session = Depends(get_db)
 ):
     project = project_or_404(db, project_id)
-    if project.creation_mode != "adaptation":
-        raise HTTPException(409, "project_rights_update_only_available_for_adaptation")
+    if project.creation_mode == "commercial":
+        raise HTTPException(409, "commercial_project_has_no_source_rights")
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == "source"
@@ -90,10 +90,21 @@ def update_project_rights(
     )
     if stage and stage.status == "needs_review":
         raise HTTPException(409, "source_locked_during_review")
+    release = None
+    if project.creation_mode == "original":
+        release = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project_id,
+                StageState.stage_key == "manuscriptRelease",
+            )
+        )
+        if release and release.status == "needs_review":
+            raise HTTPException(409, "manuscript_release_locked_during_review")
     previous = project.rights_status
     project.rights_status = data.rights_status
     if (
-        stage
+        project.creation_mode == "adaptation"
+        and stage
         and previous != project.rights_status
         and stage.status in {"accepted", "waived", "stale", "blocked"}
     ):
@@ -102,6 +113,26 @@ def update_project_rights(
         stage.stale = False
         stage.decision = {}
         invalidate_downstream_stages(db, project, "source")
+    if project.creation_mode == "original" and previous != project.rights_status:
+        if release and release.status in {"accepted", "waived", "stale", "blocked"}:
+            previous_status = release.status
+            release.status = "stale"
+            release.stale = True
+            release.version += 1
+            release.decision = {}
+            audit(
+                db,
+                project_id,
+                "stage.invalidated",
+                release.id,
+                {
+                    "stage_key": "manuscriptRelease",
+                    "reason": "project_rights_changed",
+                    "previous_status": previous_status,
+                    "version": release.version,
+                },
+            )
+            invalidate_downstream_stages(db, project, "manuscriptRelease")
     audit(
         db,
         project_id,

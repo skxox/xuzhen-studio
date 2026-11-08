@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Check, Clock3, Sparkles } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, Clock3, FileCheck2, Sparkles } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
@@ -547,6 +547,11 @@ export function OriginalNovelDraftWorkspace({ project }: { project?: Project }) 
         <Link className="text-link" to="/writing">
           <ArrowLeft size={14} /> 返回故事与剧本
         </Link>
+        {chapters.length >= 2 && stage?.status === 'accepted' ? (
+          <Link className="text-link" to="/writing/continuity">
+            <FileCheck2 size={14} /> 进入连续性审校
+          </Link>
+        ) : null}
         <Link className="text-link" to="/canvas">
           查看生成流程画布
         </Link>

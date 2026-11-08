@@ -48,6 +48,11 @@ const OriginalNovelDraftWorkspace = lazy(() =>
     default: page,
   })),
 );
+const OriginalContinuityWorkspace = lazy(() =>
+  import('../pages/OriginalContinuityWorkspace').then(({ OriginalContinuityWorkspace: page }) => ({
+    default: page,
+  })),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -365,9 +370,11 @@ function AppShell() {
     (location.pathname.startsWith('/writing')
       ? location.pathname === '/writing/chapters'
         ? '逐章正文'
-        : location.pathname === '/writing/characters'
-          ? '文学角色圣经'
-          : '故事与剧本'
+        : location.pathname === '/writing/continuity'
+          ? '连续性审校'
+          : location.pathname === '/writing/characters'
+            ? '文学角色圣经'
+            : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -422,6 +429,10 @@ function AppShell() {
               <Route
                 path="/writing/chapters"
                 element={<OriginalNovelDraftWorkspace project={project} />}
+              />
+              <Route
+                path="/writing/continuity"
+                element={<OriginalContinuityWorkspace project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

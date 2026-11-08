@@ -13,6 +13,12 @@ from ..domain.models import (
     GenerationOutput,
     StageState,
 )
+from ..services.continuity import (
+    ContinuityReportError,
+    parse_continuity_report,
+    unresolved_high_findings,
+    unresolved_medium_findings,
+)
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from .common import (
     ALLOWED,
@@ -48,6 +54,8 @@ def decide_stage(
         raise HTTPException(422, "creative_brief_cannot_be_waived")
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
+    if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
+        raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
     if data.action in {"waive", "reject"} and not data.reason:
         raise HTTPException(422, "reason_required")
     if data.action == "waive" and not data.risk_ack:
@@ -74,14 +82,70 @@ def decide_stage(
             raise HTTPException(422, "source_requires_at_least_one_chapter")
         if project.rights_status == "unconfirmed":
             raise HTTPException(422, "source_rights_must_be_recorded")
+    continuity_decision = None
+    release_decision = None
+    if stage_key == "continuity" and data.action == "accept":
+        continuity_decision = _validated_continuity_decision(db, project_id, stage)
+        report = continuity_decision["report"]
+        high_open = unresolved_high_findings(report)
+        if high_open:
+            raise HTTPException(
+                422,
+                {"code": "high_severity_findings_must_be_resolved", "finding_ids": high_open},
+            )
+        medium_open = unresolved_medium_findings(report)
+        if medium_open and (not data.risk_ack or not data.reason or not data.reason.strip()):
+            raise HTTPException(
+                422,
+                {
+                    "code": "open_medium_findings_require_risk_acknowledgement",
+                    "finding_ids": medium_open,
+                },
+            )
+        accepted_risk = [
+            finding.finding_id for finding in report.findings if finding.status == "accepted_risk"
+        ]
+        if accepted_risk and (not data.risk_ack or not data.reason or not data.reason.strip()):
+            raise HTTPException(422, "accepted_risk_findings_require_reason_and_risk_ack")
     if stage_key == "manuscriptRelease" and data.action == "accept":
-        chapter_count = len(
-            db.scalars(select(Chapter.id).where(Chapter.project_id == project_id)).all()
-        )
-        if chapter_count < 2:
-            raise HTTPException(422, "manuscript_release_requires_at_least_two_chapters")
+        if project.creation_mode != "original":
+            raise HTTPException(422, "manuscript_release_requires_original_project")
         if project.rights_status == "unconfirmed":
             raise HTTPException(422, "original_work_rights_must_be_recorded")
+        continuity_stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project_id, StageState.stage_key == "continuity"
+            )
+        )
+        if not continuity_stage or continuity_stage.status != "accepted":
+            raise HTTPException(409, "accepted_continuity_report_required")
+        continuity_decision = _validated_continuity_decision(db, project_id, continuity_stage)
+        report = continuity_decision["report"]
+        if unresolved_high_findings(report):
+            raise HTTPException(422, "high_severity_findings_must_be_resolved")
+        start, end = report.chapter_start, report.chapter_end
+        latest_chapters = _latest_chapters(db, project_id)
+        scoped_chapters = [
+            latest_chapters[ordinal]
+            for ordinal in range(start, end + 1)
+            if ordinal in latest_chapters
+        ]
+        if len(scoped_chapters) != end - start + 1:
+            raise HTTPException(409, "manuscript_release_scope_is_not_contiguous")
+        if len(scoped_chapters) < 2:
+            raise HTTPException(422, "manuscript_release_requires_at_least_two_chapters")
+        release_decision = {
+            "action": "accept",
+            "continuity_job_id": continuity_decision["job"].id,
+            "continuity_report_revision": continuity_decision["output"].revision,
+            "chapter_start": start,
+            "chapter_end": end,
+            "continuity_risk_ack": (continuity_stage.decision or {}).get("risk_ack", False),
+            "chapter_versions": [
+                {"ordinal": item.ordinal, "chapter_id": item.id, "version": item.version}
+                for item in scoped_chapters
+            ],
+        }
     chapter_candidate = None
     candidate_job = None
     if stage_key == "novelDraft" and data.action == "accept":
@@ -155,7 +219,36 @@ def decide_stage(
     stage.status = target
     stage.version += 1
     stage.stale = False
-    if stage_key != "novelDraft" or data.action != "accept":
+    if stage_key == "continuity" and data.action == "accept" and continuity_decision:
+        report = continuity_decision["report"]
+        stage.decision = {
+            "action": "accept",
+            "candidate_job_id": continuity_decision["job"].id,
+            "report_revision": continuity_decision["output"].revision,
+            "chapter_start": report.chapter_start,
+            "chapter_end": report.chapter_end,
+            "risk_ack": data.risk_ack,
+            "reason": data.reason,
+        }
+        audit(
+            db,
+            project_id,
+            "continuity.report_accepted",
+            stage.id,
+            {
+                "candidate_job_id": continuity_decision["job"].id,
+                "chapter_start": report.chapter_start,
+                "chapter_end": report.chapter_end,
+                "finding_count": len(report.findings),
+            },
+        )
+    elif stage_key == "manuscriptRelease" and data.action == "accept" and release_decision:
+        stage.decision = release_decision
+        audit(db, project_id, "manuscript.release_locked", stage.id, release_decision)
+    elif (
+        stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
+        or data.action != "accept"
+    ):
         stage.decision = {"action": data.action, "reason": data.reason, "risk_ack": data.risk_ack}
     if stage_key == "creativeBrief":
         brief = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
@@ -272,3 +365,75 @@ def submit_stage_review(project_id: str, stage_key: str, db: Session = Depends(g
         "status": stage.status,
         "version": stage.version,
     }
+
+
+def _latest_chapters(db: Session, project_id: str) -> dict[int, Chapter]:
+    items = db.scalars(
+        select(Chapter)
+        .where(Chapter.project_id == project_id)
+        .order_by(Chapter.ordinal, Chapter.version.desc())
+    ).all()
+    latest: dict[int, Chapter] = {}
+    for item in items:
+        latest.setdefault(item.ordinal, item)
+    return latest
+
+
+def _validated_continuity_decision(db: Session, project_id: str, stage: StageState) -> dict:
+    candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+    job = db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.id == candidate_job_id,
+            GenerationJob.project_id == project_id,
+            GenerationJob.stage_key == "continuity",
+            GenerationJob.status == "succeeded",
+        )
+    )
+    output = (
+        db.scalar(
+            select(GenerationOutput).where(
+                GenerationOutput.project_id == project_id,
+                GenerationOutput.job_id == candidate_job_id,
+            )
+        )
+        if job
+        else None
+    )
+    if not job or not output:
+        raise HTTPException(409, "continuity_report_candidate_missing")
+    scope = job.input_snapshot.get("scope") or {}
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if type(chapter_start) is not int or type(chapter_end) is not int:
+        raise HTTPException(409, "continuity_report_scope_missing")
+    chapters = _latest_chapters(db, project_id)
+    chapter_texts = {
+        ordinal: chapters[ordinal].body
+        for ordinal in range(chapter_start, chapter_end + 1)
+        if ordinal in chapters
+    }
+    context_ordinal = scope.get("context_chapter")
+    if type(context_ordinal) is int:
+        if context_ordinal not in chapters:
+            raise HTTPException(409, "continuity_report_context_chapter_changed")
+        chapter_texts[context_ordinal] = chapters[context_ordinal].body
+    latest_ids = {
+        chapters[ordinal].id
+        for ordinal in range(chapter_start, chapter_end + 1)
+        if ordinal in chapters
+    }
+    if type(context_ordinal) is int and context_ordinal in chapters:
+        latest_ids.add(chapters[context_ordinal].id)
+    if not latest_ids.issubset(set(job.input_snapshot.get("input_refs", []))):
+        raise HTTPException(409, "continuity_report_chapter_versions_changed")
+    try:
+        report = parse_continuity_report(
+            output.content,
+            chapter_start,
+            chapter_end,
+            chapter_texts,
+            allow_review_decisions=True,
+        )
+    except ContinuityReportError as error:
+        raise HTTPException(422, str(error)) from None
+    return {"job": job, "output": output, "report": report}

@@ -237,6 +237,7 @@ export interface EditPackage {
   revision: number;
   shot_count: number;
   subtitle_count: number;
+  audio_count: number;
   subtitle_srt?: string;
   size_bytes: number;
   sha256: string;
@@ -246,9 +247,29 @@ export interface EditPackage {
     script_release_id: string;
     script_revision: number;
     video_candidate_ids: string[];
+    audio_candidate_ids: string[];
     subtitle_preview: Array<{ start_ms: number; end_ms: number; text: string }>;
   };
   status: 'needs_review' | 'accepted' | 'rejected';
+  created_at: string;
+  file_url: string;
+}
+
+export interface AudioCandidate {
+  id: string;
+  branch_id: string;
+  script_release_id: string;
+  job_id: string;
+  episode_number: number;
+  scene_number: number;
+  dialogue_number: number;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  text: string;
+  voice_id: string;
+  provider_snapshot: Record<string, unknown>;
+  status: 'needs_review' | 'accepted' | 'rejected' | 'superseded' | 'stale';
   created_at: string;
   file_url: string;
 }

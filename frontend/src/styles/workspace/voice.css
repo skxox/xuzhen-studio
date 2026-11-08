@@ -1,0 +1,25 @@
+.voice-dialogue-text {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-inline-start: 3px solid var(--accent);
+  color: var(--ink);
+  font-size: 1.15rem;
+  line-height: 1.8;
+}
+
+.voice-candidate {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1.25rem;
+}
+
+.voice-candidate audio {
+  width: 100%;
+}
+
+.voice-candidate p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}

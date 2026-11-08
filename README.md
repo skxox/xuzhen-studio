@@ -34,7 +34,7 @@ cp .env.example .env
 uv run uvicorn app.main:app --reload
 ```
 
-API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧，视频下载后按镜头审片，所有镜头验收后才解锁后期。后期阶段可下载逐镜素材、对白 SRT 和版本来源 manifest 组成的剪辑交接包；该包不包含配音、混音或最终母版，SRT 时间码按视频请求时长估算。视频服务商必须实际实现该异步协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持视频生成。当前由前端轮询驱动任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
+API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧；对白配音使用 OpenAI-compatible `/v1/audio/speech`，按已锁定剧本逐句生成、试听并验收。所有镜头和对白均验收后才解锁后期。后期阶段可下载逐镜素材、对白 SRT、逐句配音音频和版本来源 manifest 组成的剪辑交接包；音频按对白独立交付，不含混音或最终母版，SRT 时间码按视频请求时长估算。视频/语音服务商必须实际实现相应协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持媒体生成。当前由前端轮询驱动任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
 
 ## 代码质量
 

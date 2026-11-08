@@ -110,6 +110,7 @@ def test_service_profile(
         (profile.modality == "text" and profile.adapter_id == "openai-compatible-chat")
         or (profile.modality == "image" and profile.adapter_id == "openai-compatible-image")
         or (profile.modality == "video" and profile.adapter_id == "openai-compatible-video")
+        or (profile.modality == "audio" and profile.adapter_id == "openai-compatible-audio")
     )
     if not supported_profile:
         raise HTTPException(409, "connection_test_not_supported_for_adapter")

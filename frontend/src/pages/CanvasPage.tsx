@@ -47,6 +47,7 @@ const stageRoutes: Record<string, string> = {
   characters: '/assets',
   art: '/assets',
   script: '/writing',
+  voice: '/writing/voice',
   shotDesign: '/writing/storyboard',
   keyframes: '/writing/keyframes',
   video: '/writing/video',

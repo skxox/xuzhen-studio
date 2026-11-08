@@ -2,6 +2,7 @@ import type {
   ApiHealth,
   AdaptationBranch,
   AdaptationOutlineRelease,
+  AudioCandidate,
   Chapter,
   ChapterImportResult,
   CharacterReference,
@@ -119,8 +120,12 @@ export const api = {
     `${API_ROOT}/projects/${projectId}/keyframe-candidates/${candidateId}/file`,
   videoCandidates: (projectId: string) =>
     request<VideoCandidate[]>(`/projects/${projectId}/video-candidates`),
+  audioCandidates: (projectId: string) =>
+    request<AudioCandidate[]>(`/projects/${projectId}/audio-candidates`),
   videoFileUrl: (projectId: string, candidateId: string) =>
     `${API_ROOT}/projects/${projectId}/video-candidates/${candidateId}/file`,
+  audioFileUrl: (projectId: string, candidateId: string) =>
+    `${API_ROOT}/projects/${projectId}/audio-candidates/${candidateId}/file`,
   editPackages: (projectId: string) =>
     request<EditPackage[]>(`/projects/${projectId}/edit-packages`),
   editPackage: (projectId: string, packageId: string) =>
@@ -202,6 +207,23 @@ export const api = {
     request<{ id: string; status: string; error?: Record<string, unknown> }>(
       `/projects/${projectId}/jobs`,
       { method: 'POST', body: JSON.stringify({ ...body, modality: 'video' }) },
+    ),
+  createAudioJob: (
+    projectId: string,
+    body: {
+      stage_key: string;
+      profile_id: string;
+      idempotency_key: string;
+      prompt: string;
+      parameters: Record<string, unknown>;
+      input_refs: string[];
+      scope: Record<string, string | number>;
+      data_authorized: boolean;
+    },
+  ) =>
+    request<{ id: string; status: string; error?: Record<string, unknown> }>(
+      `/projects/${projectId}/jobs`,
+      { method: 'POST', body: JSON.stringify({ ...body, modality: 'audio' }) },
     ),
   refreshVideoJob: (projectId: string, jobId: string) =>
     request<{

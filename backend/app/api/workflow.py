@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..domain.models import (
     AdaptationBranch,
     AdaptationOutlineRelease,
+    AudioCandidate,
     Chapter,
     CommercialBrief,
     CommercialMaterial,
@@ -82,7 +83,7 @@ def decide_stage(
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
     if (
-        stage_key in {"source", "outline", "shotDesign", "keyframes", "video", "post"}
+        stage_key in {"source", "outline", "shotDesign", "keyframes", "video", "voice", "post"}
         and data.action == "waive"
     ):
         raise HTTPException(422, "media_production_gates_cannot_be_waived")
@@ -353,6 +354,32 @@ def decide_stage(
         )
         if video_candidate.shot_plan_release_id != release.id or not accepted_keyframe:
             raise HTTPException(409, "video_candidate_upstream_keyframe_is_stale")
+    audio_candidate = None
+    voice_script = None
+    if stage_key == "voice" and project.creation_mode == "original":
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        audio_candidate = db.scalar(
+            select(AudioCandidate).where(
+                AudioCandidate.project_id == project_id,
+                AudioCandidate.job_id == candidate_job_id,
+                AudioCandidate.status == "needs_review",
+            )
+        )
+        if not audio_candidate:
+            raise HTTPException(409, "audio_candidate_missing_or_not_ready")
+        script_stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project_id, StageState.stage_key == "script"
+            )
+        )
+        current_script_id = (
+            (script_stage.decision or {}).get("script_release_id")
+            if script_stage and script_stage.status == "accepted"
+            else None
+        )
+        voice_script = db.get(ScriptRelease, current_script_id) if current_script_id else None
+        if not voice_script or audio_candidate.script_release_id != voice_script.id:
+            raise HTTPException(409, "audio_candidate_script_snapshot_stale")
     edit_package = None
     if stage_key == "post" and project.creation_mode == "original":
         package_id = (stage.decision or {}).get("edit_package_id")
@@ -879,6 +906,60 @@ def decide_stage(
             "required_shot_count": len(required),
         }
         audit(db, project_id, f"video.{video_candidate.status}", video_candidate.id, stage.decision)
+    elif stage_key == "voice" and audio_candidate and voice_script:
+        if data.action == "accept":
+            previous = db.scalars(
+                select(AudioCandidate).where(
+                    AudioCandidate.project_id == project_id,
+                    AudioCandidate.script_release_id == audio_candidate.script_release_id,
+                    AudioCandidate.episode_number == audio_candidate.episode_number,
+                    AudioCandidate.scene_number == audio_candidate.scene_number,
+                    AudioCandidate.dialogue_number == audio_candidate.dialogue_number,
+                    AudioCandidate.status == "accepted",
+                )
+            ).all()
+            for item in previous:
+                item.status = "superseded"
+        audio_candidate.status = "accepted" if data.action == "accept" else "rejected"
+        db.flush()
+        accepted_lines = db.scalars(
+            select(AudioCandidate).where(
+                AudioCandidate.project_id == project_id,
+                AudioCandidate.script_release_id == audio_candidate.script_release_id,
+                AudioCandidate.status == "accepted",
+            )
+        ).all()
+        accepted_dialogues = {
+            (item.episode_number, item.scene_number, item.dialogue_number)
+            for item in accepted_lines
+        }
+        required_dialogues = {
+            (episode["episode_number"], scene["scene_number"], line["dialogue_number"])
+            for episode in voice_script.episodes
+            for scene in episode["scenes"]
+            for line in scene["dialogues"]
+        }
+        all_accepted = accepted_dialogues == required_dialogues
+        stage.status = "accepted" if all_accepted else "blocked"
+        stage.decision = {
+            "action": data.action,
+            "candidate_job_id": audio_candidate.job_id,
+            "audio_candidate_id": audio_candidate.id,
+            "script_release_id": audio_candidate.script_release_id,
+            "episode_number": audio_candidate.episode_number,
+            "scene_number": audio_candidate.scene_number,
+            "dialogue_number": audio_candidate.dialogue_number,
+            "reason": data.reason,
+            "accepted_dialogue_count": len(accepted_dialogues),
+            "required_dialogue_count": len(required_dialogues),
+        }
+        audit(
+            db,
+            project_id,
+            f"voice.candidate_{audio_candidate.status}",
+            audio_candidate.id,
+            stage.decision,
+        )
     elif stage_key == "post" and edit_package:
         edit_package.status = "accepted" if data.action == "accept" else "rejected"
         stage.decision = {

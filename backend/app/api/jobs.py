@@ -10,11 +10,14 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..domain.models import (
+    AdaptationBranch,
+    AudioCandidate,
     Chapter,
     GenerationJob,
     GenerationOutput,
     GenerationOutputVersion,
     KeyframeCandidate,
+    ScriptRelease,
     ServiceProfile,
     StageState,
     VideoCandidate,
@@ -39,6 +42,7 @@ from ..services.keyframe_plan import (
 )
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
+from ..services.openai_compatible_audio import generate_speech
 from ..services.openai_compatible_image import generate_image
 from ..services.openai_compatible_video import download_video, retrieve_video, submit_video
 from .common import (
@@ -63,6 +67,21 @@ def scope_number(scope: dict, key: str) -> int:
     if type(value) is not int or value < 1:
         raise KeyframePlanError(f"分镜范围缺少有效的 {key}。")
     return value
+
+
+def find_script_dialogue(
+    script: ScriptRelease, episode_number: int, scene_number: int, dialogue_number: int
+) -> dict:
+    for episode in script.episodes:
+        if episode.get("episode_number") != episode_number:
+            continue
+        for scene in episode.get("scenes", []):
+            if scene.get("scene_number") != scene_number:
+                continue
+            for line in scene.get("dialogues", []):
+                if line.get("dialogue_number") == dialogue_number:
+                    return line
+    raise KeyframePlanError("对白编号不属于当前已验收剧本版本。")
 
 
 @router.post("/projects/{project_id}/jobs", status_code=202)
@@ -296,6 +315,64 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             raise HTTPException(422, "unsupported_video_duration")
         if data.parameters.get("size") not in {"1280x720", "720x1280", "1024x1024"}:
             raise HTTPException(422, "unsupported_video_size")
+    audio_dialogue = None
+    audio_script = None
+    audio_branch = None
+    if data.stage_key == "voice":
+        if data.modality != "audio" or profile.adapter_id != "openai-compatible-audio":
+            raise HTTPException(422, "voice_generation_requires_audio_adapter")
+        if project.creation_mode != "original":
+            raise HTTPException(422, "voice_generation_requires_locked_script")
+        script_stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project_id, StageState.stage_key == "script"
+            )
+        )
+        script_id = (
+            (script_stage.decision or {}).get("script_release_id")
+            if script_stage and script_stage.status == "accepted"
+            else None
+        )
+        audio_script = db.get(ScriptRelease, script_id) if script_id else None
+        if not audio_script:
+            raise HTTPException(409, "accepted_script_release_required")
+        audio_branch = db.get(AdaptationBranch, audio_script.branch_id)
+        if not audio_branch or audio_branch.project_id != project_id:
+            raise HTTPException(409, "script_branch_snapshot_invalid")
+        try:
+            episode_number = scope_number(data.scope, "episode_number")
+            scene_number = scope_number(data.scope, "scene_number")
+            dialogue_number = scope_number(data.scope, "dialogue_number")
+            audio_dialogue = find_script_dialogue(
+                audio_script, episode_number, scene_number, dialogue_number
+            )
+        except KeyframePlanError as error:
+            raise HTTPException(409, str(error)) from None
+        if (
+            data.scope.get("script_release_id") != audio_script.id
+            or data.scope.get("base_text_hash")
+            != hashlib.sha256(audio_dialogue["text"].encode("utf-8")).hexdigest()
+            or data.prompt != audio_dialogue["text"]
+            or not {audio_script.id, audio_script.job_id}.issubset(set(data.input_refs))
+        ):
+            raise HTTPException(409, "voice_dialogue_snapshot_changed")
+        if set(data.parameters) - {"voice", "response_format", "speed"}:
+            raise HTTPException(422, "unsupported_speech_parameters")
+        if data.parameters.get("response_format", "mp3") not in {
+            "mp3",
+            "wav",
+            "opus",
+            "aac",
+            "flac",
+        }:
+            raise HTTPException(422, "unsupported_speech_format")
+        speed = data.parameters.get("speed", 1.0)
+        if (
+            isinstance(speed, bool)
+            or not isinstance(speed, (int, float))
+            or not 0.25 <= speed <= 4.0
+        ):
+            raise HTTPException(422, "unsupported_speech_speed")
     if data.stage_key in {"characters", "art"} and project.creation_mode == "original":
         try:
             branch, outline_release, _ = current_adaptation_outline_context(db, project)
@@ -343,6 +420,11 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         data.modality == "video"
         and data.stage_key == "video"
         and profile.adapter_id == "openai-compatible-video"
+    )
+    supported = supported or (
+        data.modality == "audio"
+        and data.stage_key == "voice"
+        and profile.adapter_id == "openai-compatible-audio"
     )
     if not supported:
         job = GenerationJob(
@@ -411,7 +493,9 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         elif not parsed.path.rstrip("/").endswith("/v1"):
             completion_url = f"{completion_url}/v1"
         completion_url = f"{completion_url}/chat/completions"
-    target_url = profile.endpoint if data.modality in {"image", "video"} else completion_url
+    target_url = (
+        profile.endpoint if data.modality in {"image", "video", "audio"} else completion_url
+    )
     target_ips = validate_provider_target(target_url, profile.transport)
     job = GenerationJob(
         project_id=project_id,
@@ -460,6 +544,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
     try:
         image_result = None
         video_task = None
+        audio_result = None
         if data.modality == "image":
             image_result = generate_image(
                 endpoint=profile.endpoint,
@@ -491,6 +576,21 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 input_content_type=video_keyframe.content_type,
                 seconds=int(data.parameters["seconds"]),
                 size=str(data.parameters["size"]),
+            )
+            content = ""
+            usage = {}
+        elif data.modality == "audio":
+            if not audio_dialogue:
+                raise HTTPException(409, "accepted_script_dialogue_required")
+            audio_result = generate_speech(
+                endpoint=profile.endpoint,
+                target_ip=target_ips[0],
+                model_id=profile.model_id,
+                secret=secret,
+                text=data.prompt,
+                voice=str(data.parameters.get("voice", "alloy")),
+                response_format=str(data.parameters.get("response_format", "mp3")),
+                speed=float(data.parameters.get("speed", 1.0)),
             )
             content = ""
             usage = {}
@@ -877,11 +977,63 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "keyframe_candidate_id": video_keyframe.id,
             }
         )
+    audio_candidate = None
+    if audio_result and audio_dialogue and audio_script and audio_branch:
+        audio_bytes, audio_type = audio_result
+        extension = {
+            "audio/mpeg": ".mp3",
+            "audio/wav": ".wav",
+            "audio/ogg": ".ogg",
+            "audio/aac": ".aac",
+            "audio/flac": ".flac",
+        }[audio_type]
+        relative_key = f"generated/{project_id}/{uuid4()}{extension}"
+        audio_path = settings.storage_dir / relative_key
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(audio_bytes)
+        scope = job.input_snapshot.get("scope") or {}
+        audio_candidate = AudioCandidate(
+            project_id=project_id,
+            branch_id=audio_branch.id,
+            script_release_id=audio_script.id,
+            job_id=job.id,
+            episode_number=scope["episode_number"],
+            scene_number=scope["scene_number"],
+            dialogue_number=scope["dialogue_number"],
+            storage_key=relative_key,
+            content_type=audio_type,
+            size_bytes=len(audio_bytes),
+            sha256=hashlib.sha256(audio_bytes).hexdigest(),
+            text=job.input_snapshot["prompt"],
+            voice_id=str(job.input_snapshot["parameters"].get("voice", "alloy")),
+            provider_snapshot=job.provider_snapshot,
+            status=(
+                "needs_review"
+                if stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+                else "stale"
+            ),
+        )
+        db.add(audio_candidate)
+        db.flush()
+        content = json.dumps(
+            {
+                "audio_candidate_id": audio_candidate.id,
+                "script_release_id": audio_script.id,
+                "episode_number": audio_candidate.episode_number,
+                "scene_number": audio_candidate.scene_number,
+                "dialogue_number": audio_candidate.dialogue_number,
+                "content_type": audio_type,
+                "size_bytes": audio_candidate.size_bytes,
+                "sha256": audio_candidate.sha256,
+            }
+        )
     output = GenerationOutput(
         project_id=project_id,
         job_id=job.id,
         content_type="application/json"
-        if data.stage_key in {"novelDraft", "continuity", "video"}
+        if data.stage_key in {"novelDraft", "continuity", "video", "voice"}
         or (data.stage_key == "source" and project.creation_mode == "original")
         or (data.stage_key == "outline" and project.creation_mode == "original")
         or (data.stage_key == "script" and project.creation_mode == "original")
@@ -916,6 +1068,27 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 {
                     "job_id": job.id,
                     "provider_task_id": video_task.task_id,
+                },
+            )
+        elif audio_candidate:
+            job.status = "succeeded"
+            stage.status = "needs_review"
+            stage.version += 1
+            stage.stale = False
+            stage.decision = {
+                "candidate_job_id": job.id,
+                "audio_candidate_id": audio_candidate.id,
+            }
+            audit(
+                db,
+                project_id,
+                "voice.candidate_created",
+                audio_candidate.id,
+                {
+                    "job_id": job.id,
+                    "episode_number": audio_candidate.episode_number,
+                    "scene_number": audio_candidate.scene_number,
+                    "dialogue_number": audio_candidate.dialogue_number,
                 },
             )
         else:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..domain.models import (
     AdaptationBranch,
+    AudioCandidate,
     KeyframeCandidate,
     ShotPlanRelease,
     StageState,
@@ -157,3 +158,52 @@ def get_video_file(project_id: str, candidate_id: str, db: Session = Depends(get
     if settings.storage_dir.resolve() not in path.parents or not path.is_file():
         raise HTTPException(404, "video_candidate_file_not_found")
     return FileResponse(path, media_type="video/mp4", filename=f"shot-{candidate.id}.mp4")
+
+
+@router.get("/projects/{project_id}/audio-candidates")
+def list_audio_candidates(project_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    rows = db.scalars(
+        select(AudioCandidate)
+        .where(AudioCandidate.project_id == project_id)
+        .order_by(AudioCandidate.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "branch_id": row.branch_id,
+            "script_release_id": row.script_release_id,
+            "job_id": row.job_id,
+            "episode_number": row.episode_number,
+            "scene_number": row.scene_number,
+            "dialogue_number": row.dialogue_number,
+            "storage_key": row.storage_key,
+            "content_type": row.content_type,
+            "size_bytes": row.size_bytes,
+            "sha256": row.sha256,
+            "text": row.text,
+            "voice_id": row.voice_id,
+            "provider_snapshot": row.provider_snapshot,
+            "status": row.status,
+            "created_at": row.created_at,
+            "file_url": f"/api/projects/{project_id}/audio-candidates/{row.id}/file",
+        }
+        for row in rows
+    ]
+
+
+@router.get("/projects/{project_id}/audio-candidates/{candidate_id}/file")
+def get_audio_file(project_id: str, candidate_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    candidate = db.scalar(
+        select(AudioCandidate).where(
+            AudioCandidate.id == candidate_id,
+            AudioCandidate.project_id == project_id,
+        )
+    )
+    if not candidate:
+        raise HTTPException(404, "audio_candidate_not_found")
+    path = (settings.storage_dir / candidate.storage_key).resolve()
+    if settings.storage_dir.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "audio_candidate_file_not_found")
+    return FileResponse(path, media_type=candidate.content_type)

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..domain.models import EditPackage, ScriptRelease, StageState, VideoCandidate
+from ..domain.models import AudioCandidate, EditPackage, ScriptRelease, StageState, VideoCandidate
 from ..services.edit_package import (
     MAX_EDIT_PACKAGE_BYTES,
     EditPackageError,
@@ -61,6 +61,7 @@ def create_edit_package(project_id: str, db: Session = Depends(get_db)):
     script = db.get(ScriptRelease, plan.script_release_id)
     if not script:
         raise HTTPException(409, "locked_script_release_missing")
+    audio_map = _accepted_audio_candidates(db, project_id, script)
     previous = db.scalar(
         select(EditPackage.revision)
         .where(EditPackage.project_id == project_id)
@@ -76,6 +77,7 @@ def create_edit_package(project_id: str, db: Session = Depends(get_db)):
             plan=plan,
             script=script,
             candidates=candidate_map,
+            audio_candidates=audio_map,
             storage_dir=settings.storage_dir,
             output_path=package_path,
         )
@@ -183,6 +185,7 @@ def update_edit_package_subtitles(
     script = db.get(ScriptRelease, plan.script_release_id)
     if not script:
         raise HTTPException(409, "locked_script_release_missing")
+    audio_map = _accepted_audio_candidates(db, project_id, script)
     next_revision = previous.revision + 1
     package_id = str(uuid4())
     relative_key = f"generated/{project_id}/edit-package-{package_id}.zip"
@@ -193,6 +196,7 @@ def update_edit_package_subtitles(
             plan=plan,
             script=script,
             candidates=candidate_map,
+            audio_candidates=audio_map,
             storage_dir=settings.storage_dir,
             output_path=package_path,
             subtitle_override=data.srt,
@@ -270,6 +274,7 @@ def _package_payload(
         "revision": package.revision,
         "shot_count": package.shot_count,
         "subtitle_count": package.subtitle_count,
+        "audio_count": len((package.source_snapshot or {}).get("audio_candidate_ids", [])),
         "size_bytes": package.size_bytes,
         "sha256": package.sha256,
         "source_snapshot": package.source_snapshot,
@@ -280,3 +285,27 @@ def _package_payload(
     if include_subtitles:
         payload["subtitle_srt"] = package.subtitle_srt
     return payload
+
+
+def _accepted_audio_candidates(
+    db: Session, project_id: str, script: ScriptRelease
+) -> dict[tuple[int, int, int], AudioCandidate]:
+    rows = db.scalars(
+        select(AudioCandidate).where(
+            AudioCandidate.project_id == project_id,
+            AudioCandidate.script_release_id == script.id,
+            AudioCandidate.status == "accepted",
+        )
+    ).all()
+    candidate_map = {
+        (row.episode_number, row.scene_number, row.dialogue_number): row for row in rows
+    }
+    required = {
+        (episode["episode_number"], scene["scene_number"], line["dialogue_number"])
+        for episode in script.episodes
+        for scene in episode["scenes"]
+        for line in scene["dialogues"]
+    }
+    if set(candidate_map) != required:
+        raise HTTPException(409, "all_script_dialogue_audio_must_be_accepted_before_packaging")
+    return candidate_map

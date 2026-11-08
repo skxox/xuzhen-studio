@@ -15,6 +15,7 @@ from .common import (
     get_db,
     invalidate_downstream_stages,
     project_or_404,
+    refresh_ready_stages,
     safe_project,
     stage_dependencies,
 )
@@ -150,11 +151,26 @@ def update_project_rights(
 @router.get("/projects/{project_id}/stages")
 def get_stages(project_id: str, db: Session = Depends(get_db)):
     project = project_or_404(db, project_id)
-    stages = db.scalars(
-        select(StageState)
-        .where(StageState.project_id == project_id)
-        .order_by(StageState.created_at)
-    ).all()
+    stage_path = (
+        NOVEL_STAGES
+        if project.creation_mode == "original"
+        else COMMERCIAL_STAGES
+        if project.creation_mode == "commercial"
+        else VIDEO_STAGES
+    )
+    existing_keys = set(
+        db.scalars(select(StageState.stage_key).where(StageState.project_id == project_id)).all()
+    )
+    if "voice" in stage_path and "voice" not in existing_keys:
+        db.add(StageState(project_id=project_id, stage_key="voice", status="not_started"))
+        db.flush()
+        refresh_ready_stages(db, project)
+        db.commit()
+    stages_by_key = {
+        stage.stage_key: stage
+        for stage in db.scalars(select(StageState).where(StageState.project_id == project_id)).all()
+    }
+    stages = [stages_by_key[key] for key in stage_path if key in stages_by_key]
     return [
         {
             "id": stage.id,

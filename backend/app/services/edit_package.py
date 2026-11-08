@@ -5,7 +5,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..domain.models import ScriptRelease, ShotPlanRelease, VideoCandidate
+from ..domain.models import AudioCandidate, ScriptRelease, ShotPlanRelease, VideoCandidate
 
 MAX_EDIT_PACKAGE_BYTES = 1_000_000_000
 
@@ -20,6 +20,7 @@ class EditPackageResult:
     sha256: str
     shot_count: int
     subtitle_count: int
+    audio_count: int
     subtitle_srt: str
     source_snapshot: dict
 
@@ -30,6 +31,7 @@ def build_edit_package(
     plan: ShotPlanRelease,
     script: ScriptRelease,
     candidates: dict[tuple[int, int, int], VideoCandidate],
+    audio_candidates: dict[tuple[int, int, int], AudioCandidate],
     storage_dir: Path,
     output_path: Path,
     subtitle_override: str | None = None,
@@ -40,6 +42,32 @@ def build_edit_package(
     entries: list[tuple[str, bytes | Path]] = []
     manifest_shots: list[dict] = []
     subtitles: list[tuple[int, int, str, str]] = []
+    audio_manifest: list[dict] = []
+    if set(audio_candidates) != set(dialogues):
+        raise EditPackageError("当前剧本的逐句配音覆盖不完整。")
+    for audio_key, audio in sorted(audio_candidates.items()):
+        if audio.status != "accepted" or audio.script_release_id != script.id:
+            raise EditPackageError("存在未验收或过期的对白配音。")
+        audio_path = (storage_dir / audio.storage_key).resolve()
+        if storage_dir.resolve() not in audio_path.parents or not audio_path.is_file():
+            raise EditPackageError("已验收对白配音文件缺失。")
+        episode_number, scene_number, dialogue_number = audio_key
+        audio_name = (
+            f"audio/ep{episode_number:02}-sc{scene_number:02}-dl{dialogue_number:02}"
+            f"{audio_path.suffix}"
+        )
+        entries.append((audio_name, audio_path))
+        audio_manifest.append(
+            {
+                "episode_number": episode_number,
+                "scene_number": scene_number,
+                "dialogue_number": dialogue_number,
+                "asset": audio_name,
+                "audio_candidate_id": audio.id,
+                "voice_id": audio.voice_id,
+                "sha256": audio.sha256,
+            }
+        )
     timeline_ms = 0
     for episode in plan.episodes:
         episode_number = _positive_int(episode.get("episode_number"), "集序")
@@ -98,7 +126,11 @@ def build_edit_package(
         "script_release_id": script.id,
         "script_revision": script.revision,
         "timing_basis": "requested_video_seconds; verify against media before final export",
-        "audio": {"included": False, "note": "该剪辑包不含配音或混音轨。"},
+        "audio": {
+            "included": bool(audio_manifest),
+            "mixing_included": False,
+            "clips": audio_manifest,
+        },
         "shots": manifest_shots,
     }
     total_size = sum(
@@ -122,7 +154,8 @@ def build_edit_package(
                     "clips/ 按 manifest.json 的 order 排列。\n"
                     "subtitles/zh-CN.srt 按镜头请求时长估算时间码；\n"
                     "正式导出前请在剪辑软件中按素材实际时长校准。\n"
-                    "本包不包含配音、混音、转场渲染或最终母版。\n"
+                    "audio/ 按对白编号保存已验收的独立配音片段，不含混音。\n"
+                    "本包不包含转场渲染或最终母版。\n"
                 ).encode(),
             ),
         ]
@@ -146,6 +179,7 @@ def build_edit_package(
         sha256=digest.hexdigest(),
         shot_count=len(manifest_shots),
         subtitle_count=len(subtitle_rows),
+        audio_count=len(audio_manifest),
         subtitle_srt=subtitle_text,
         source_snapshot={
             "shot_plan_release_id": plan.id,
@@ -153,6 +187,7 @@ def build_edit_package(
             "script_release_id": script.id,
             "script_revision": script.revision,
             "video_candidate_ids": [shot["video_candidate_id"] for shot in manifest_shots],
+            "audio_candidate_ids": [audio["audio_candidate_id"] for audio in audio_manifest],
             "subtitle_preview": [
                 {
                     "start_ms": start,

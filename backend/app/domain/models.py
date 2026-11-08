@@ -265,6 +265,34 @@ class VideoCandidate(Timestamped, Base):
     status: Mapped[str] = mapped_column(String(24), default="processing")
 
 
+class AudioCandidate(Timestamped, Base):
+    __tablename__ = "audio_candidates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    script_release_id: Mapped[str] = mapped_column(
+        ForeignKey("script_releases.id", ondelete="RESTRICT"), index=True
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), unique=True, index=True
+    )
+    episode_number: Mapped[int] = mapped_column(Integer)
+    scene_number: Mapped[int] = mapped_column(Integer)
+    dialogue_number: Mapped[int] = mapped_column(Integer)
+    storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    text: Mapped[str] = mapped_column(Text)
+    voice_id: Mapped[str] = mapped_column(String(120))
+    provider_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="needs_review")
+
+
 class EditPackage(Timestamped, Base):
     __tablename__ = "edit_packages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

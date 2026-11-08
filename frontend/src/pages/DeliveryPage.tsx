@@ -41,8 +41,20 @@ export function DeliveryPage({ project }: { project?: Project }) {
     queryFn: () => api.videoCandidates(projectId!),
     enabled: Boolean(projectId),
   });
+  const audioQuery = useQuery({
+    queryKey: ['audio-candidates', projectId],
+    queryFn: () => api.audioCandidates(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const scriptsQuery = useQuery({
+    queryKey: ['script-releases', projectId],
+    queryFn: () => api.scriptReleases(projectId!),
+    enabled: Boolean(projectId),
+  });
   const stages = stagesQuery.data ?? [];
   const stage = stages.find((item) => item.stage_key === 'post');
+  const voiceStage = stages.find((item) => item.stage_key === 'voice');
+  const scriptStage = stages.find((item) => item.stage_key === 'script');
   const deliveryStage = stages.find((item) => item.stage_key === 'delivery');
   const plan = plansQuery.data?.find((item) => item.is_current);
   const latestPackage = packagesQuery.data?.[0];
@@ -54,12 +66,35 @@ export function DeliveryPage({ project }: { project?: Project }) {
   const candidates = (videosQuery.data ?? []).filter(
     (item) => item.shot_plan_release_id === plan?.id && item.status === 'accepted',
   );
+  const scriptReleaseId = String(scriptStage?.decision.script_release_id ?? '');
+  const currentScript = scriptsQuery.data?.find((item) => item.id === scriptReleaseId);
+  const requiredDialogues =
+    currentScript?.episodes.reduce(
+      (count, episode) =>
+        count +
+        episode.scenes.reduce((sceneCount, scene) => sceneCount + scene.dialogues.length, 0),
+      0,
+    ) ?? 0;
+  const acceptedDialogueKeys = new Set(
+    (audioQuery.data ?? [])
+      .filter((item) => item.status === 'accepted' && item.script_release_id === scriptReleaseId)
+      .map((item) => `${item.episode_number}:${item.scene_number}:${item.dialogue_number}`),
+  );
+  const acceptedDialogueCount = acceptedDialogueKeys.size;
+  const voiceComplete = Boolean(
+    currentScript &&
+    requiredDialogues > 0 &&
+    voiceStage?.status === 'accepted' &&
+    acceptedDialogueCount === requiredDialogues,
+  );
   const expectedShots = plan?.shot_count ?? 0;
-  const complete = Boolean(
+  const videoComplete = Boolean(
     plan &&
+    expectedShots > 0 &&
     stages.find((item) => item.stage_key === 'video')?.status === 'accepted' &&
     candidates.length === expectedShots,
   );
+  const complete = videoComplete && voiceComplete;
   const refresh = async () =>
     Promise.all(
       ['stages', 'edit-packages'].map((key) =>
@@ -68,7 +103,8 @@ export function DeliveryPage({ project }: { project?: Project }) {
     );
   const create = useMutation({
     mutationFn: async () => {
-      if (!projectId || !complete) throw new Error('全部逐镜视频验收后才能创建剪辑包。');
+      if (!projectId || !complete)
+        throw new Error('请先完成当前分镜的逐镜视频和当前剧本的逐句配音验收。');
       if (stage?.status === 'needs_review') throw new Error('请先验收或退回当前剪辑包。');
       if (stage?.status !== 'running') await api.startStage(projectId, 'post');
       return api.createEditPackage(projectId);
@@ -101,14 +137,18 @@ export function DeliveryPage({ project }: { project?: Project }) {
     saveSubtitles.error ??
     stagesQuery.error ??
     packagesQuery.error ??
-    packageDetailQuery.error;
+    packageDetailQuery.error ??
+    audioQuery.error ??
+    scriptsQuery.error ??
+    plansQuery.error ??
+    videosQuery.error;
   const subtitlePreview = packageDetail?.source_snapshot.subtitle_preview ?? [];
   return (
     <div className="delivery-page">
       <PageHeading
         eyebrow="POST-PRODUCTION · HANDOFF"
-        title="生成可继续编辑的剪辑交接包。"
-        description="汇总已验收逐镜视频，按锁定剧本生成 SRT，并附带镜头顺序与版本来源清单。此包不是已配音、已混音或渲染完成的最终母版。"
+        title="整理经过审阅的成片素材。"
+        description="汇总已验收视频、逐句配音和中文字幕，生成可继续编辑的剪辑交接包。交接包尚未混音或渲染为最终母版。"
         actions={
           <Badge tone={stage?.status === 'accepted' ? 'green' : 'gold'} dot>
             后期阶段 · {stage?.status ?? '等待上游'}
@@ -126,20 +166,29 @@ export function DeliveryPage({ project }: { project?: Project }) {
             <div className="delivery-master__head">
               <div>
                 <Badge tone={complete ? 'green' : 'gold'}>
-                  {complete ? '逐镜素材齐备' : '等待逐镜视频验收'}
+                  {complete ? '视频与配音齐备' : '等待视频与配音验收'}
                 </Badge>
                 <h2>{project.name}</h2>
                 <p>
-                  已验收视频 {candidates.length} / {expectedShots} · 当前分镜版本{' '}
-                  {plan?.revision ?? '—'}
+                  视频 {candidates.length} / {expectedShots} · 配音 {acceptedDialogueCount} /{' '}
+                  {requiredDialogues} 句 · 分镜 v{plan?.revision ?? '—'}
                 </p>
               </div>
               <Film size={24} />
             </div>
             {!complete && (
               <p>
-                需要当前分镜下的每个镜头都有一个已验收视频候选。
-                <Link to="/writing/video">前往逐镜视频审片</Link>
+                {!videoComplete ? (
+                  <>
+                    需要当前分镜下的每个镜头都有已验收视频候选。{' '}
+                    <Link to="/writing/video">前往逐镜视频审片</Link>
+                  </>
+                ) : (
+                  <>
+                    需要当前锁定剧本的每句对白都有已验收配音。{' '}
+                    <Link to="/writing/voice">前往逐句配音审阅</Link>
+                  </>
+                )}
               </p>
             )}
             {stage?.status === 'running' && !create.isPending && (
@@ -168,8 +217,8 @@ export function DeliveryPage({ project }: { project?: Project }) {
               <div className="package-review">
                 <h3>剪辑包 v{latestPackage.revision} 等待审核</h3>
                 <p>
-                  压缩包包含 {latestPackage.shot_count} 条视频、{latestPackage.subtitle_count}{' '}
-                  条字幕。请下载并检查字幕时间码与镜头顺序。
+                  压缩包包含 {latestPackage.shot_count} 条视频、{latestPackage.audio_count} 条配音和{' '}
+                  {latestPackage.subtitle_count} 条字幕。请下载并检查字幕时间码与镜头顺序。
                 </p>
                 <a className="text-link" href={api.editPackageFileUrl(projectId, latestPackage.id)}>
                   <ArrowDownToLine size={15} /> 下载并检查剪辑包
@@ -241,7 +290,7 @@ export function DeliveryPage({ project }: { project?: Project }) {
                 onClick={() => create.mutate()}
               >
                 {create.isPending
-                  ? '正在打包镜头素材…'
+                  ? '正在打包视频、配音和字幕…'
                   : stage?.status === 'running'
                     ? '恢复并重新打包'
                     : '生成剪辑交接包'}
@@ -282,6 +331,17 @@ export function DeliveryPage({ project }: { project?: Project }) {
                 <div>
                   <Clapperboard size={15} />
                   <span>
+                    逐句配音<small>独立音频片段 · 不含混音</small>
+                  </span>
+                  <Badge tone={voiceComplete ? 'green' : 'gold'}>
+                    {latestPackage
+                      ? `${latestPackage.audio_count} 条`
+                      : `${acceptedDialogueCount}/${requiredDialogues}`}
+                  </Badge>
+                </div>
+                <div>
+                  <Clapperboard size={15} />
+                  <span>
                     来源清单<small>manifest.json · 含上游版本 ID</small>
                   </span>
                   <Badge>
@@ -291,7 +351,7 @@ export function DeliveryPage({ project }: { project?: Project }) {
               </div>
               <p className="quality-footer">
                 SRT
-                时间码以视频请求时长估算，正式成片前需按素材实际时长校准。剪辑包不包含配音和最终合成。
+                时间码以视频请求时长估算，正式成片前需按素材实际时长校准。交接包包含逐句配音，但不含混音和最终视频合成。
               </p>
               {latestPackage && (
                 <p>
@@ -334,7 +394,7 @@ export function DeliveryPage({ project }: { project?: Project }) {
           <h3>历史剪辑包</h3>
           {packagesQuery.data?.slice(1).map((item) => (
             <p key={item.id}>
-              v{item.revision} · {item.status} · {item.shot_count} 镜头 ·{' '}
+              v{item.revision} · {item.status} · {item.shot_count} 镜头 · {item.audio_count} 配音 ·{' '}
               <a href={api.editPackageFileUrl(projectId!, item.id)}>下载</a>
             </p>
           ))}

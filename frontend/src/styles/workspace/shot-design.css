@@ -1,0 +1,127 @@
+.shot-plan-episode {
+  margin-top: 1.5rem;
+}
+.shot-plan-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.shot-plan-fieldset:disabled {
+  opacity: 0.75;
+}
+.shot-plan-episode > h3 {
+  font-size: 1.1rem;
+}
+.shot-plan-scene {
+  margin: 1rem 0 1.5rem;
+}
+.shot-plan-scene > h4 {
+  margin-bottom: 0.7rem;
+  color: var(--text-secondary);
+}
+.shot-plan-card {
+  margin: 0.7rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.shot-plan-card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.shot-plan-card > header span {
+  color: var(--text-secondary);
+}
+.shot-plan-card > header .icon-button {
+  margin-left: auto;
+}
+.shot-plan-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.shot-plan-controls label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+.shot-plan-controls input,
+.shot-plan-controls select,
+.shot-plan-controls textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+.shot-plan-controls textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.shot-plan-controls label:nth-of-type(5),
+.shot-plan-controls label:nth-of-type(6),
+.shot-plan-controls label:nth-of-type(10),
+.shot-plan-controls label:nth-of-type(11),
+.shot-plan-source {
+  grid-column: 1 / -1;
+}
+.shot-plan-source {
+  color: var(--text-tertiary);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+.shot-plan-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+.workspace-actions {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.workspace-actions .field {
+  min-width: min(24rem, 100%);
+  flex: 1;
+}
+.release-card {
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.release-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.release-card pre {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  white-space: pre-wrap;
+}
+@media (max-width: 720px) {
+  .shot-plan-controls {
+    grid-template-columns: 1fr;
+  }
+  .shot-plan-controls label,
+  .shot-plan-source {
+    grid-column: 1;
+  }
+}

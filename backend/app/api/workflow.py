@@ -17,6 +17,7 @@ from ..domain.models import (
     GenerationOutput,
     ManuscriptRelease,
     ScriptRelease,
+    ShotPlanRelease,
     StageState,
 )
 from ..services.adaptation_mapping import (
@@ -24,10 +25,12 @@ from ..services.adaptation_mapping import (
     current_adaptation_branch,
     current_adaptation_outline_context,
     current_adaptation_script_context,
+    current_adaptation_script_release_context,
     current_release_chapters,
     parse_adaptation_outline,
     parse_episode_source_mapping,
     parse_script_candidate,
+    parse_storyboard_plan,
 )
 from ..services.continuity import (
     ContinuityReportError,
@@ -70,7 +73,7 @@ def decide_stage(
         raise HTTPException(422, "creative_brief_cannot_be_waived")
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
-    if stage_key in {"source", "outline"} and data.action == "waive":
+    if stage_key in {"source", "outline", "shotDesign"} and data.action == "waive":
         raise HTTPException(422, "source_and_adaptation_outline_cannot_be_waived")
     if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
         raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
@@ -242,6 +245,59 @@ def decide_stage(
             "character_job_id": character_job.id,
             "art_job_id": art_job.id,
             "episodes": script.episodes,
+        }
+    shot_plan_decision = None
+    if (
+        stage_key == "shotDesign"
+        and data.action == "accept"
+        and project.creation_mode == "original"
+    ):
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        candidate_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == candidate_job_id,
+                GenerationJob.project_id == project_id,
+                GenerationJob.stage_key == "shotDesign",
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(
+                select(GenerationOutput).where(
+                    GenerationOutput.project_id == project_id,
+                    GenerationOutput.job_id == candidate_job_id,
+                )
+            )
+            if candidate_job
+            else None
+        )
+        if not candidate_job or not output:
+            raise HTTPException(409, "storyboard_candidate_missing")
+        try:
+            branch, outline_release, outline_episodes, script_release, character_job, art_job = (
+                current_adaptation_script_release_context(db, project)
+            )
+            scope = candidate_job.input_snapshot.get("scope") or {}
+            if scope.get("script_release_id") != script_release.id:
+                raise EpisodeSourceMappingError("分镜候选对应的剧本版本已变化。")
+            plan = parse_storyboard_plan(
+                output.content,
+                branch_id=branch.id,
+                script_release_id=script_release.id,
+                character_job_id=character_job.id,
+                art_job_id=art_job.id,
+                script_episodes=script_release.episodes,
+                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
+            )
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(422, str(error)) from None
+        shot_plan_decision = {
+            "candidate_job_id": candidate_job.id,
+            "branch_id": branch.id,
+            "script_release_id": script_release.id,
+            "character_job_id": character_job.id,
+            "art_job_id": art_job.id,
+            "episodes": plan.episodes,
         }
     if (
         stage_key in {"characters", "art"}
@@ -617,6 +673,38 @@ def decide_stage(
             "art_job_id": release.art_job_id,
         }
         audit(db, project_id, "script.release_accepted", release.id, stage.decision)
+    elif stage_key == "shotDesign" and data.action == "accept" and shot_plan_decision:
+        previous = db.scalar(
+            select(ShotPlanRelease)
+            .where(ShotPlanRelease.branch_id == shot_plan_decision["branch_id"])
+            .order_by(ShotPlanRelease.revision.desc())
+            .limit(1)
+        )
+        episodes = [episode.model_dump() for episode in shot_plan_decision["episodes"]]
+        release = ShotPlanRelease(
+            branch_id=shot_plan_decision["branch_id"],
+            script_release_id=shot_plan_decision["script_release_id"],
+            revision=(previous.revision + 1) if previous else 1,
+            job_id=shot_plan_decision["candidate_job_id"],
+            character_job_id=shot_plan_decision["character_job_id"],
+            art_job_id=shot_plan_decision["art_job_id"],
+            episode_count=len(episodes),
+            shot_count=sum(len(scene["shots"]) for ep in episodes for scene in ep["scenes"]),
+            episodes=episodes,
+        )
+        db.add(release)
+        db.flush()
+        stage.decision = {
+            "action": "accept",
+            "candidate_job_id": release.job_id,
+            "shot_plan_release_id": release.id,
+            "revision": release.revision,
+            "branch_id": release.branch_id,
+            "script_release_id": release.script_release_id,
+            "episode_count": release.episode_count,
+            "shot_count": release.shot_count,
+        }
+        audit(db, project_id, "storyboard.release_accepted", release.id, stage.decision)
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"

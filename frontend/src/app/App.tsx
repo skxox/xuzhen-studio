@@ -68,6 +68,11 @@ const OriginalScriptWorkspace = lazy(() =>
     default: page,
   })),
 );
+const OriginalShotDesignWorkspace = lazy(() =>
+  import('../pages/OriginalShotDesignWorkspace').then(({ OriginalShotDesignWorkspace: page }) => ({
+    default: page,
+  })),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -393,9 +398,11 @@ function AppShell() {
               ? '视频改编大纲'
               : location.pathname === '/writing/script'
                 ? '分集剧本'
-                : location.pathname === '/writing/characters'
-                  ? '文学角色圣经'
-                  : '故事与剧本'
+                : location.pathname === '/writing/storyboard'
+                  ? '镜头设计'
+                  : location.pathname === '/writing/characters'
+                    ? '文学角色圣经'
+                    : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -466,6 +473,10 @@ function AppShell() {
               <Route
                 path="/writing/script"
                 element={<OriginalScriptWorkspace key={project?.id} project={project} />}
+              />
+              <Route
+                path="/writing/storyboard"
+                element={<OriginalShotDesignWorkspace key={project?.id} project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

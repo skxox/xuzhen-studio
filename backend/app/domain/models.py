@@ -179,6 +179,31 @@ class ScriptRelease(Timestamped, Base):
     __table_args__ = (UniqueConstraint("branch_id", "revision", name="uq_script_release_revision"),)
 
 
+class ShotPlanRelease(Timestamped, Base):
+    __tablename__ = "shot_plan_releases"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    script_release_id: Mapped[str] = mapped_column(
+        ForeignKey("script_releases.id", ondelete="RESTRICT"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    character_job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT")
+    )
+    art_job_id: Mapped[str] = mapped_column(ForeignKey("generation_jobs.id", ondelete="RESTRICT"))
+    episode_count: Mapped[int] = mapped_column(Integer)
+    shot_count: Mapped[int] = mapped_column(Integer)
+    episodes: Mapped[list[dict]] = mapped_column(JSON)
+    __table_args__ = (
+        UniqueConstraint("branch_id", "revision", name="uq_shot_plan_release_revision"),
+    )
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

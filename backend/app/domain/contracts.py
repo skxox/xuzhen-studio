@@ -158,7 +158,7 @@ class EpisodeAdaptationOutlineCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     episode_number: int = Field(ge=1)
-    source_chapter_ordinals: list[int] = Field(min_length=1, max_length=200)
+    source_chapter_ordinals: list[int] = Field(default_factory=list, max_length=200)
     adaptation_summary: str = Field(min_length=1, max_length=2000)
     emotional_arc: str = Field(min_length=1, max_length=1200)
     ending_hook: str = Field(min_length=1, max_length=1000)
@@ -236,3 +236,75 @@ class ScriptCandidate(BaseModel):
     art_job_id: str = Field(min_length=36, max_length=36)
     episode_count: int = Field(ge=1, le=500)
     episodes: list[EpisodeScriptCandidate] = Field(min_length=1, max_length=500)
+
+
+class StoryboardShotCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shot_number: int = Field(ge=1)
+    shot_size: Literal[
+        "extreme_wide",
+        "wide",
+        "medium",
+        "close_up",
+        "extreme_close_up",
+        "over_shoulder",
+        "insert",
+    ]
+    camera_angle: Literal["eye_level", "high_angle", "low_angle", "overhead", "dutch"]
+    camera_movement: Literal["static", "pan", "tilt", "dolly", "tracking", "handheld", "zoom"]
+    composition: str = Field(min_length=1, max_length=1200)
+    visible_action: str = Field(min_length=1, max_length=1600)
+    character_names: list[str] = Field(default_factory=list, max_length=20)
+    asset_refs: list[str] = Field(default_factory=list, max_length=30)
+    dialogue_numbers: list[int] = Field(default_factory=list, max_length=60)
+    duration_seconds: int = Field(ge=1, le=180)
+    source_chapter_ordinals: list[int] = Field(default_factory=list, max_length=200)
+    continuity_anchors: list[str] = Field(min_length=1, max_length=30)
+    visual_prompt: str = Field(min_length=1, max_length=3000)
+    negative_prompt: str = Field(min_length=1, max_length=2000)
+    transition: str = Field(min_length=1, max_length=600)
+
+    @field_validator(
+        "composition",
+        "visible_action",
+        "visual_prompt",
+        "negative_prompt",
+        "transition",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("character_names", "asset_refs", "continuity_anchors", mode="before")
+    @classmethod
+    def normalize_string_lists(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return value
+
+
+class StoryboardSceneCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_number: int = Field(ge=1)
+    shots: list[StoryboardShotCandidate] = Field(min_length=1, max_length=60)
+
+
+class StoryboardEpisodeCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_number: int = Field(ge=1)
+    scenes: list[StoryboardSceneCandidate] = Field(min_length=1, max_length=30)
+
+
+class StoryboardPlanCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    branch_id: str = Field(min_length=36, max_length=36)
+    script_release_id: str = Field(min_length=36, max_length=36)
+    character_job_id: str = Field(min_length=36, max_length=36)
+    art_job_id: str = Field(min_length=36, max_length=36)
+    episode_count: int = Field(ge=1, le=500)
+    episodes: list[StoryboardEpisodeCandidate] = Field(min_length=1, max_length=500)

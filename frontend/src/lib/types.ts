@@ -145,6 +145,43 @@ export type EpisodeScript = ScriptRelease['episodes'][number];
 export type ScriptScene = EpisodeScript['scenes'][number];
 export type ScriptDialogue = ScriptScene['dialogues'][number];
 
+export interface ShotPlanRelease {
+  id: string;
+  branch_id: string;
+  script_release_id: string;
+  revision: number;
+  job_id: string;
+  character_job_id: string;
+  art_job_id: string;
+  episode_count: number;
+  shot_count: number;
+  episodes: Array<{
+    episode_number: number;
+    scenes: Array<{
+      scene_number: number;
+      shots: Array<{
+        shot_number: number;
+        shot_size: string;
+        camera_angle: string;
+        camera_movement: string;
+        composition: string;
+        visible_action: string;
+        character_names: string[];
+        asset_refs: string[];
+        dialogue_numbers: number[];
+        duration_seconds: number;
+        source_chapter_ordinals: number[];
+        continuity_anchors: string[];
+        visual_prompt: string;
+        negative_prompt: string;
+        transition: string;
+      }>;
+    }>;
+  }>;
+  is_current: boolean;
+  created_at: string;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

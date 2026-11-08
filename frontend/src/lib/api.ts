@@ -17,6 +17,7 @@ import type {
   ProjectCreateInput,
   ServiceProfile,
   ScriptRelease,
+  ShotPlanRelease,
   StageState,
 } from './types';
 
@@ -107,6 +108,8 @@ export const api = {
     request<AdaptationOutlineRelease[]>(`/projects/${projectId}/adaptation-outlines`),
   scriptReleases: (projectId: string) =>
     request<ScriptRelease[]>(`/projects/${projectId}/script-releases`),
+  shotPlanReleases: (projectId: string) =>
+    request<ShotPlanRelease[]>(`/projects/${projectId}/shot-plan-releases`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   job: (projectId: string, jobId: string) =>
     request<GenerationJobSummary>(`/projects/${projectId}/jobs/${jobId}`),

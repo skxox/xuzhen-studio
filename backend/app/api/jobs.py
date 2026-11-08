@@ -18,10 +18,12 @@ from ..services.adaptation_mapping import (
     current_adaptation_branch,
     current_adaptation_outline_context,
     current_adaptation_script_context,
+    current_adaptation_script_release_context,
     current_release_chapters,
     parse_adaptation_outline,
     parse_episode_source_mapping,
     parse_script_candidate,
+    parse_storyboard_plan,
 )
 from ..services.continuity import ContinuityReportError, parse_continuity_report
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
@@ -185,6 +187,24 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         }
         if not required_refs.issubset(set(data.input_refs)):
             raise HTTPException(409, "script_upstream_inputs_incomplete")
+    if data.stage_key == "shotDesign" and project.creation_mode == "original":
+        try:
+            branch, outline, _, script_release, character_job, art_job = (
+                current_adaptation_script_release_context(db, project)
+            )
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(409, str(error)) from None
+        scope = data.scope
+        required = {branch.id, outline.id, script_release.id, character_job.id, art_job.id}
+        if (
+            scope.get("branch_id") != branch.id
+            or scope.get("outline_release_id") != outline.id
+            or scope.get("script_release_id") != script_release.id
+            or scope.get("character_job_id") != character_job.id
+            or scope.get("art_job_id") != art_job.id
+            or not required.issubset(set(data.input_refs))
+        ):
+            raise HTTPException(409, "storyboard_upstream_snapshot_changed")
     if data.stage_key in {"characters", "art"} and project.creation_mode == "original":
         try:
             branch, outline_release, _ = current_adaptation_outline_context(db, project)
@@ -437,6 +457,50 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "error": job.error,
                 "provider_snapshot": job.provider_snapshot,
             }
+    if data.stage_key == "shotDesign" and project.creation_mode == "original":
+        try:
+            branch, outline_release, outline_episodes, script_release, character_job, art_job = (
+                current_adaptation_script_release_context(db, project)
+            )
+            scope = job.input_snapshot.get("scope") or {}
+            if (
+                scope.get("branch_id") != branch.id
+                or scope.get("outline_release_id") != outline_release.id
+                or scope.get("script_release_id") != script_release.id
+            ):
+                raise EpisodeSourceMappingError("分镜候选引用的剧本版本已变化。")
+            parse_storyboard_plan(
+                content,
+                branch_id=branch.id,
+                script_release_id=script_release.id,
+                character_job_id=character_job.id,
+                art_job_id=art_job.id,
+                script_episodes=script_release.episodes,
+                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
+            )
+        except (EpisodeSourceMappingError, KeyError) as error:
+            stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
+                )
+            )
+            job.status = "failed"
+            job.error = {"code": "invalid_storyboard_plan", "message": str(error)}
+            if (
+                stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+            ):
+                stage.status = "failed"
+                stage.version += 1
+            audit(db, project_id, "job.failed", job.id, job.error)
+            db.commit()
+            return {
+                "id": job.id,
+                "status": job.status,
+                "error": job.error,
+                "provider_snapshot": job.provider_snapshot,
+            }
     if data.stage_key == "continuity":
         try:
             _validate_continuity_output(db, project_id, job, content, allow_review_decisions=False)
@@ -600,6 +664,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         or (data.stage_key == "source" and project.creation_mode == "original")
         or (data.stage_key == "outline" and project.creation_mode == "original")
         or (data.stage_key == "script" and project.creation_mode == "original")
+        or (data.stage_key == "shotDesign" and project.creation_mode == "original")
         else "text/markdown",
         content=content,
         metadata_json={"usage": usage},
@@ -809,6 +874,32 @@ def edit_generation_output(
                     art_job_id=art_job.id,
                     outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
                     chapter_bodies={chapter.ordinal: chapter.body for chapter in release_chapters},
+                )
+            except (EpisodeSourceMappingError, KeyError) as error:
+                raise HTTPException(422, str(error)) from None
+    if job.stage_key == "shotDesign":
+        project = project_or_404(db, project_id)
+        if project.creation_mode == "original":
+            try:
+                (
+                    branch,
+                    outline_release,
+                    outline_episodes,
+                    script_release,
+                    character_job,
+                    art_job,
+                ) = current_adaptation_script_release_context(db, project)
+                scope = job.input_snapshot.get("scope") or {}
+                if scope.get("script_release_id") != script_release.id:
+                    raise EpisodeSourceMappingError("剧本上游版本已变化。")
+                parse_storyboard_plan(
+                    data.content,
+                    branch_id=branch.id,
+                    script_release_id=script_release.id,
+                    character_job_id=character_job.id,
+                    art_job_id=art_job.id,
+                    script_episodes=script_release.episodes,
+                    outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
                 )
             except (EpisodeSourceMappingError, KeyError) as error:
                 raise HTTPException(422, str(error)) from None

@@ -6,6 +6,7 @@ from ..domain.contracts import (
     AdaptationOutlineCandidate,
     EpisodeSourceMappingPlanCandidate,
     ScriptCandidate,
+    StoryboardPlanCandidate,
 )
 from ..domain.models import (
     AdaptationBranch,
@@ -17,6 +18,7 @@ from ..domain.models import (
     GenerationOutput,
     ManuscriptRelease,
     Project,
+    ScriptRelease,
     StageState,
 )
 
@@ -157,6 +159,48 @@ def current_adaptation_script_context(
     ].id not in accepted_jobs[1].input_snapshot.get("input_refs", []):
         raise EpisodeSourceMappingError("美术设定没有引用当前已验收的视频角色约束版本。")
     return branch, outline_release, outline_episodes, accepted_jobs[0], accepted_jobs[1]
+
+
+def current_adaptation_script_release_context(
+    db: Session, project: Project
+) -> tuple[
+    AdaptationBranch,
+    AdaptationOutlineRelease,
+    list[EpisodeAdaptationOutline],
+    ScriptRelease,
+    GenerationJob,
+    GenerationJob,
+]:
+    branch, outline_release, outline_episodes, character_job, art_job = (
+        current_adaptation_script_context(db, project)
+    )
+    script_stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project.id,
+            StageState.stage_key == "script",
+        )
+    )
+    script_release_id = (
+        (script_stage.decision or {}).get("script_release_id")
+        if script_stage and script_stage.status == "accepted"
+        else None
+    )
+    script_release = db.scalar(
+        select(ScriptRelease).where(
+            ScriptRelease.id == script_release_id,
+            ScriptRelease.branch_id == branch.id,
+            ScriptRelease.outline_release_id == outline_release.id,
+        )
+    )
+    if not script_release:
+        raise EpisodeSourceMappingError("当前分支尚无已验收的分集剧本版本。")
+    if (
+        script_release.character_job_id != character_job.id
+        or script_release.art_job_id != art_job.id
+        or script_release.episode_count != len(outline_episodes)
+    ):
+        raise EpisodeSourceMappingError("剧本引用的大纲、角色或美术版本已变化。")
+    return branch, outline_release, outline_episodes, script_release, character_job, art_job
 
 
 def current_adaptation_outline_context(
@@ -396,3 +440,98 @@ def parse_script_candidate(
                     "时长超出大纲预算。"
                 )
     return script
+
+
+def parse_storyboard_plan(
+    content: str,
+    *,
+    branch_id: str,
+    script_release_id: str,
+    character_job_id: str,
+    art_job_id: str,
+    script_episodes: list[dict],
+    outline_episodes: list[dict],
+) -> StoryboardPlanCandidate:
+    try:
+        plan = StoryboardPlanCandidate.model_validate_json(content)
+    except ValidationError as error:
+        raise EpisodeSourceMappingError("分镜候选格式无效，请检查镜头字段。") from error
+    if (
+        plan.branch_id != branch_id
+        or plan.script_release_id != script_release_id
+        or plan.character_job_id != character_job_id
+        or plan.art_job_id != art_job_id
+        or plan.episode_count != len(script_episodes)
+        or len(script_episodes) != len(outline_episodes)
+    ):
+        raise EpisodeSourceMappingError("分镜候选引用的剧本或角色/美术版本已变化。")
+    if [episode.episode_number for episode in plan.episodes] != list(
+        range(1, len(script_episodes) + 1)
+    ):
+        raise EpisodeSourceMappingError("分镜必须完整覆盖剧本集数，集序不得缺失或重复。")
+    for episode, script_episode, outline_episode in zip(
+        plan.episodes, script_episodes, outline_episodes, strict=True
+    ):
+        if episode.episode_number != script_episode["episode_number"]:
+            raise EpisodeSourceMappingError("分镜集序与已验收剧本不一致。")
+        if len(episode.scenes) != len(script_episode["scenes"]):
+            raise EpisodeSourceMappingError(
+                f"第 {episode.episode_number} 集分镜必须覆盖剧本中的全部场次。"
+            )
+        if len(episode.scenes) != len(outline_episode["scenes"]):
+            raise EpisodeSourceMappingError("分镜场次与已验收大纲结构不一致。")
+        for scene, script_scene, outline_scene in zip(
+            episode.scenes,
+            script_episode["scenes"],
+            outline_episode["scenes"],
+            strict=True,
+        ):
+            if (
+                scene.scene_number != script_scene["scene_number"]
+                or scene.scene_number != outline_scene["scene_number"]
+            ):
+                raise EpisodeSourceMappingError("分镜场次序号必须沿用剧本和大纲。")
+            if not scene.shots:
+                raise EpisodeSourceMappingError("每个剧本场次至少需要一个镜头。")
+            if [shot.shot_number for shot in scene.shots] != list(range(1, len(scene.shots) + 1)):
+                raise EpisodeSourceMappingError("每场镜头序号必须从 1 连续排列。")
+            dialogue_numbers = [number for shot in scene.shots for number in shot.dialogue_numbers]
+            expected_dialogue_numbers = [
+                line["dialogue_number"] for line in script_scene["dialogues"]
+            ]
+            if len(dialogue_numbers) != len(set(dialogue_numbers)) or set(dialogue_numbers) != set(
+                expected_dialogue_numbers
+            ):
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场的每句对白"
+                    "必须且只能覆盖一次。"
+                )
+            target_seconds = script_scene["action_seconds"] + sum(
+                line["estimated_seconds"] for line in script_scene["dialogues"]
+            )
+            if sum(shot.duration_seconds for shot in scene.shots) != target_seconds:
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场镜头时长"
+                    "必须精确覆盖剧本动作与对白时长。"
+                )
+            allowed_sources = set(outline_scene["source_chapter_ordinals"])
+            allowed_characters = set(outline_scene["character_names"])
+            for shot in scene.shots:
+                if shot.source_chapter_ordinals != outline_scene["source_chapter_ordinals"]:
+                    raise EpisodeSourceMappingError(
+                        f"第 {episode.episode_number} 集第 {scene.scene_number} 场镜头出处"
+                        "必须继承已验收大纲。"
+                    )
+                if not set(shot.character_names).issubset(allowed_characters):
+                    raise EpisodeSourceMappingError("镜头不能引入当前场景角色名单之外的人物。")
+                if shot.dialogue_numbers and not set(shot.dialogue_numbers).issubset(
+                    set(expected_dialogue_numbers)
+                ):
+                    raise EpisodeSourceMappingError("镜头对白编号必须来自当前剧本场次。")
+                if shot.source_chapter_ordinals and not set(shot.source_chapter_ordinals).issubset(
+                    allowed_sources
+                ):
+                    raise EpisodeSourceMappingError("镜头引用了超出已验收场景的章节。")
+                if not shot.continuity_anchors:
+                    raise EpisodeSourceMappingError("每个镜头都必须写明连续性检查锚点。")
+    return plan

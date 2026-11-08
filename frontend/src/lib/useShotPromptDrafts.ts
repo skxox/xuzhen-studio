@@ -18,11 +18,14 @@ function readDrafts(storageKey: string): PromptDrafts {
   }
 }
 
-export function useShotPromptDrafts(stageKey: string) {
-  const storageKey = `xuzhen:shot-prompt-drafts:v1:${stageKey}`;
-  const [drafts, setDrafts] = useState<PromptDrafts>(() => readDrafts(storageKey));
+export function useShotPromptDrafts(projectId: string | undefined, stageKey: string) {
+  const storageKey = projectId ? `xuzhen:shot-prompt-drafts:v1:${projectId}:${stageKey}` : '';
+  const [drafts, setDrafts] = useState<PromptDrafts>(() =>
+    storageKey ? readDrafts(storageKey) : {},
+  );
 
   useEffect(() => {
+    if (!storageKey) return;
     try {
       if (Object.keys(drafts).length === 0) {
         window.sessionStorage.removeItem(storageKey);

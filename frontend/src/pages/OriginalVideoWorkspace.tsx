@@ -24,7 +24,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts('video');
+  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts(projectId, 'video');
   const [seconds, setSeconds] = useState(6);
   const [size, setSize] = useState('1280x720');
   const [reason, setReason] = useState('');

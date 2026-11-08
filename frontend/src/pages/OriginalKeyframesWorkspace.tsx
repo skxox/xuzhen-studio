@@ -34,7 +34,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts('keyframes');
+  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts(projectId, 'keyframes');
   const [size, setSize] = useState('1024x1024');
   const [reason, setReason] = useState('');
   const stagesQuery = useQuery({

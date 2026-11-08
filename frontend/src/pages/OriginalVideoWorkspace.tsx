@@ -10,8 +10,11 @@ import type { Project, ShotPlanRelease, VideoCandidate } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
 type ShotRef = { episode_number: number; scene_number: number; shot_number: number; shot: Shot };
+type PromptDrafts = Record<string, string>;
 const keyOf = (shot: Pick<ShotRef, 'episode_number' | 'scene_number' | 'shot_number'>) =>
   `${shot.episode_number}:${shot.scene_number}:${shot.shot_number}`;
+const promptDraftKey = (planId: string | undefined, shotKey: string) =>
+  planId && shotKey ? `${planId}:${shotKey}` : '';
 
 export function OriginalVideoWorkspace({ project }: { project?: Project }) {
   const projectId = project?.id;
@@ -20,7 +23,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDraft, setPromptDraft] = useState<{ key: string; value: string } | null>(null);
+  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>({});
   const [seconds, setSeconds] = useState(6);
   const [size, setSize] = useState('1280x720');
   const [reason, setReason] = useState('');
@@ -105,10 +108,12 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
     shots.find((shot) => !acceptedVideos.has(keyOf(shot))) ??
     shots[0];
   const currentKey = focus ? keyOf(focus) : '';
+  const currentDraftKey = promptDraftKey(plan?.id, currentKey);
+  const currentPromptDraft = promptDrafts[currentDraftKey];
   const keyframe = focus ? acceptedFrames.get(currentKey) : undefined;
   const prompt =
-    promptDraft?.key === currentKey
-      ? promptDraft.value
+    currentPromptDraft !== undefined
+      ? currentPromptDraft
       : focus
         ? `${focus.shot.visual_prompt}\n\nMotion: ${focus.shot.visible_action}. Camera: ${focus.shot.camera_movement}. Transition: ${focus.shot.transition}.\n\nAvoid: ${focus.shot.negative_prompt}`
         : '';
@@ -125,10 +130,10 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
       ),
     );
   const generate = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ prompt: submittedPrompt }: { draftKey: string; prompt: string }) => {
       if (!projectId || !plan || !focus || !keyframe || !profile)
         throw new Error('需要已验收分镜、对应关键帧和可用视频 API。');
-      if (!prompt.trim()) throw new Error('视频提示词不能为空。');
+      if (!submittedPrompt.trim()) throw new Error('视频提示词不能为空。');
       if (pending) throw new Error('请先审阅当前视频候选。');
       if (stage?.status !== 'running') await api.startStage(projectId, 'video');
       idempotency.current = crypto.randomUUID();
@@ -136,7 +141,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
         stage_key: 'video',
         profile_id: profile.id,
         idempotency_key: idempotency.current,
-        prompt: prompt.trim(),
+        prompt: submittedPrompt.trim(),
         parameters: { seconds, size },
         input_refs: [
           plan.id,
@@ -156,8 +161,13 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
         data_authorized: consent,
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, { draftKey }) => {
       setConsent(false);
+      setPromptDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[draftKey];
+        return nextDrafts;
+      });
       await refresh();
     },
     onError: refresh,
@@ -167,7 +177,6 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
       api.decideStage(projectId!, 'video', action, action === 'reject' ? reason.trim() : undefined),
     onSuccess: async () => {
       setReason('');
-      setPromptDraft(null);
       setSelectedKey('');
       await refresh();
     },
@@ -295,7 +304,6 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                           key={keyOf(ref)}
                           onClick={() => {
                             setSelectedKey(keyOf(ref));
-                            setPromptDraft(null);
                           }}
                         >
                           <span>
@@ -347,14 +355,21 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                   </p>
                   <Field
                     label="视频提示词"
-                    hint="以分镜动作与运镜作为默认提示，可在本次任务中调整，不改动锁定分镜。"
+                    hint={
+                      currentPromptDraft !== undefined
+                        ? '未提交的本地草稿；切换镜头会保留，任务创建成功后随任务快照保存。'
+                        : '以分镜动作与运镜作为默认提示，可在本次任务中调整，不改动锁定分镜。'
+                    }
                   >
                     <textarea
                       rows={6}
                       value={prompt}
                       disabled={Boolean(pending) || running}
                       onChange={(event) =>
-                        setPromptDraft({ key: currentKey, value: event.target.value })
+                        setPromptDrafts((drafts) => ({
+                          ...drafts,
+                          [currentDraftKey]: event.target.value,
+                        }))
                       }
                     />
                   </Field>
@@ -387,7 +402,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                           )
                         }
                         disabled={!profile || !consent || running || !keyframe}
-                        onClick={() => generate.mutate()}
+                        onClick={() => generate.mutate({ draftKey: currentDraftKey, prompt })}
                       >
                         {acceptedVideos.has(currentKey) ? '重新生成此镜头' : '生成视频候选'}
                       </Button>

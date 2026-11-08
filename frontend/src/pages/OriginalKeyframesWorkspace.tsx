@@ -10,6 +10,7 @@ import type { Project, ShotPlanRelease } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
 type ShotRef = { episode_number: number; scene_number: number; shot_number: number; shot: Shot };
+type PromptDrafts = Record<string, string>;
 
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
@@ -21,6 +22,10 @@ function refKey(ref: Pick<ShotRef, 'episode_number' | 'scene_number' | 'shot_num
   return `${ref.episode_number}:${ref.scene_number}:${ref.shot_number}`;
 }
 
+function promptDraftKey(planId: string | undefined, shotKey: string) {
+  return planId && shotKey ? `${planId}:${shotKey}` : '';
+}
+
 export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const projectId = project?.id;
   const queryClient = useQueryClient();
@@ -28,7 +33,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDraft, setPromptDraft] = useState<{ key: string; value: string } | null>(null);
+  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>({});
   const [size, setSize] = useState('1024x1024');
   const [reason, setReason] = useState('');
   const stagesQuery = useQuery({
@@ -96,9 +101,11 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const requested = shots.find((item) => refKey(item) === selectedKey);
   const focus = pendingRef ?? requested ?? firstUnaccepted ?? shots[0];
   const currentKey = focus ? refKey(focus) : '';
+  const currentDraftKey = promptDraftKey(plan?.id, currentKey);
+  const currentPromptDraft = promptDrafts[currentDraftKey];
   const prompt =
-    promptDraft?.key === currentKey
-      ? promptDraft.value
+    currentPromptDraft !== undefined
+      ? currentPromptDraft
       : focus
         ? `${focus.shot.visual_prompt}\n\nAvoid: ${focus.shot.negative_prompt}`
         : '';
@@ -115,10 +122,10 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
       ),
     );
   const generate = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ prompt: submittedPrompt }: { draftKey: string; prompt: string }) => {
       if (!projectId || !plan || !focus || !profile)
         throw new Error('需要已验收的分镜镜头和可用图片模型。');
-      if (!prompt.trim()) throw new Error('生成提示词不能为空。');
+      if (!submittedPrompt.trim()) throw new Error('生成提示词不能为空。');
       if (stage?.status === 'needs_review') throw new Error('请先处理当前等待审核的关键帧。');
       const basePromptHash = await sha256(focus.shot.visual_prompt);
       if (stage?.status !== 'running') await api.startStage(projectId, 'keyframes');
@@ -127,7 +134,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
         stage_key: 'keyframes',
         profile_id: profile.id,
         idempotency_key: idempotencyKey.current,
-        prompt: prompt.trim(),
+        prompt: submittedPrompt.trim(),
         parameters: { size },
         input_refs: [
           plan.id,
@@ -146,8 +153,13 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
         data_authorized: consent,
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, { draftKey }) => {
       setConsent(false);
+      setPromptDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[draftKey];
+        return nextDrafts;
+      });
       await refresh();
     },
     onError: refresh,
@@ -162,7 +174,6 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
       ),
     onSuccess: async () => {
       setReason('');
-      setPromptDraft(null);
       setSelectedKey('');
       await refresh();
     },
@@ -274,7 +285,6 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                           key={key}
                           onClick={() => {
                             setSelectedKey(key);
-                            setPromptDraft(null);
                           }}
                         >
                           <span>{done ? '✓' : needsReview ? '◷' : '○'}</span>
@@ -315,15 +325,22 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                   </p>
                   <Field
                     label="生成提示词"
-                    hint="允许为本次关键帧覆盖分镜提示词；分镜版本本身不会被修改。"
+                    hint={
+                      currentPromptDraft !== undefined
+                        ? '未提交的本地草稿；切换镜头会保留，生成成功后随任务快照保存。'
+                        : '允许为本次关键帧覆盖分镜提示词；分镜版本本身不会被修改。'
+                    }
                   >
                     <textarea
                       rows={7}
                       value={prompt}
+                      disabled={Boolean(pending) || running}
                       onChange={(event) =>
-                        setPromptDraft({ key: currentKey, value: event.target.value })
+                        setPromptDrafts((drafts) => ({
+                          ...drafts,
+                          [currentDraftKey]: event.target.value,
+                        }))
                       }
-                      disabled={Boolean(pending)}
                     />
                   </Field>
                   {currentCandidate && (
@@ -385,7 +402,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                           running ||
                           (accepted.size === shots.length && !canRegenerateSelected)
                         }
-                        onClick={() => generate.mutate()}
+                        onClick={() => generate.mutate({ draftKey: currentDraftKey, prompt })}
                       >
                         {accepted.has(currentKey) ? '重新生成此镜头' : '生成关键帧'}
                       </Button>

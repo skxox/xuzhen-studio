@@ -381,85 +381,43 @@
 }
 .asset-visual {
   position: relative;
-  display: block;
+  display: grid;
   width: 100%;
   height: 152px;
   overflow: hidden;
   border: 0;
-  background: linear-gradient(130deg, #61553c, #272c29);
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  background: var(--surface-raised);
+  color: var(--muted);
   cursor: pointer;
 }
-.asset-visual__shape {
-  position: absolute;
-  inset: 14% 19%;
-  border: 1px solid rgba(240, 226, 190, 0.4);
-  background: linear-gradient(150deg, rgba(241, 219, 158, 0.28), transparent 65%);
-  box-shadow: 0 0 40px rgba(226, 192, 133, 0.13);
+.asset-reference-placeholder,
+.asset-reference-date {
+  color: var(--muted);
+  font-size: 9px;
 }
-.asset-visual::before {
-  position: absolute;
-  inset: 0;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 21%,
-      rgba(224, 214, 187, 0.1) 21.2% 21.6%,
-      transparent 21.8% 40%
-    ),
-    linear-gradient(0deg, rgba(15, 18, 16, 0.42), transparent);
-  content: '';
+.reference-details {
+  display: grid;
+  gap: 14px;
 }
-.asset-visual--person {
-  background: linear-gradient(130deg, #4d493e, #202421 70%);
-}
-.asset-visual--person .asset-visual__shape {
-  inset: 15% 39% 0;
-  border: 0;
-  border-radius: 50% 50% 0 0;
-  background: linear-gradient(#c9ad8c 0 19%, #262823 20%);
-}
-.asset-visual--portrait {
-  background: linear-gradient(135deg, #74664f, #2e302b 70%);
-}
-.asset-visual--portrait .asset-visual__shape {
-  inset: 9% 33% 0;
-  border: 0;
-  border-radius: 46% 46% 0 0;
-  background: linear-gradient(#baa07e 0 20%, #35342d 21%);
-}
-.asset-visual--prop {
-  background: radial-gradient(ellipse at 50% 58%, #a78859, #3f392c 29%, #23251f 70%);
-}
-.asset-visual--prop .asset-visual__shape {
-  inset: 29% 39%;
-  border-radius: 50% 50% 40% 40%;
-  background: linear-gradient(90deg, #8b7c59, #d2bd89, #6f6247);
-}
-.asset-visual--frame {
-  background: linear-gradient(130deg, #8d7652, #34382f);
-}
-.asset-visual--blueprint {
-  background-color: #30434a;
-  background-image:
-    linear-gradient(rgba(174, 210, 208, 0.12) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(174, 210, 208, 0.12) 1px, transparent 1px);
-  background-size: 18px 18px;
-}
-.asset-visual--blueprint .asset-visual__shape {
-  inset: 18% 13%;
-  border: 1px solid rgba(183, 221, 216, 0.56);
-  background: transparent;
-  box-shadow: inset 20px 0 transparent;
+.reference-details .field p {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 .asset-version,
 .asset-visual__index {
   position: absolute;
   top: 8px;
   padding: 3px 5px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  background: rgba(14, 16, 15, 0.46);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--surface);
+  color: var(--ink-soft);
   font-family: ui-monospace, monospace;
   font-size: 8px;
 }
@@ -476,10 +434,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-.asset-card__body > div .plain-icon {
-  width: 23px;
-  height: 23px;
 }
 .asset-card__body > b {
   display: block;

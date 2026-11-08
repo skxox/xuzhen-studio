@@ -27,6 +27,7 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
   });
   const masters = mastersQuery.data ?? [];
   const latestMaster = masters[0];
+  const qualityReport = latestMaster?.source_snapshot.quality_report;
   const refresh = async () =>
     Promise.all([
       client.invalidateQueries({ queryKey: ['delivery-masters', project.id] }),
@@ -78,7 +79,8 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
         </Badge>
       </div>
       <p>
-        按镜头顺序拼接视频，将逐句配音按字幕时间位置混合，并嵌入可切换的中文字幕轨。生成后需试听、审片并验收。
+        按镜头顺序拼接视频，将逐句配音按字幕时间位置混合，并嵌入可切换的中文字幕轨。FFprobe
+        会检查容器、视频/音频/字幕轨、数据包和实际时长；通过后仍需人工审片。
       </p>
       {!runtimeQuery.isLoading && !runtimeQuery.data?.master_render_available && (
         <p className="form-error">{runtimeQuery.data?.message ?? 'FFmpeg 运行状态检查失败。'}</p>
@@ -100,10 +102,19 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
           />
           <p>
             {latestMaster.width} × {latestMaster.height} · 目标时长{' '}
-            {latestMaster.duration_seconds.toFixed(1)} 秒 ·{' '}
+            {latestMaster.duration_seconds.toFixed(1)} 秒实测 ·{' '}
             {(latestMaster.size_bytes / 1_000_000).toFixed(1)} MB · SHA{' '}
             {latestMaster.sha256.slice(0, 12)}
           </p>
+          {qualityReport ? (
+            <p>
+              自动检查通过 · H.264 {qualityReport.video.packets_read} 包 · AAC{' '}
+              {qualityReport.audio.packets_read} 包 · 字幕 {qualityReport.subtitle.packets_read} 条
+              · 时长偏差 {qualityReport.duration_delta_seconds.toFixed(2)} 秒
+            </p>
+          ) : (
+            <p className="form-error">该母版没有新版 FFprobe 质量报告，请退回并重新合成。</p>
+          )}
           <label className="field">
             <span>退回原因</span>
             <input
@@ -123,7 +134,7 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
               variant="primary"
               icon={<Check size={15} />}
               onClick={() => decide.mutate('accept')}
-              disabled={decide.isPending}
+              disabled={decide.isPending || !qualityReport?.passed}
             >
               验收最终母版
             </Button>

@@ -23,6 +23,7 @@ class MasterRenderResult:
     duration_seconds: float
     width: int
     height: int
+    quality_report: dict
 
 
 def ffmpeg_available(binary: str) -> bool:
@@ -49,16 +50,32 @@ def ffmpeg_available(binary: str) -> bool:
     )
 
 
+def ffprobe_available(binary: str) -> bool:
+    executable = shutil.which(binary)
+    if not executable:
+        return False
+    try:
+        result = subprocess.run(
+            [executable, "-version"], capture_output=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def render_master(
     *,
     package_path: Path,
     output_path: Path,
     aspect_ratio: str,
     ffmpeg_binary: str,
+    ffprobe_binary: str,
     expected_package_sha256: str,
 ) -> MasterRenderResult:
     if not ffmpeg_available(ffmpeg_binary):
         raise MasterRenderError("ffmpeg_unavailable")
+    if not ffprobe_available(ffprobe_binary):
+        raise MasterRenderError("ffprobe_unavailable")
     width, height = _dimensions(aspect_ratio)
     with tempfile.TemporaryDirectory(prefix="xuzhen-master-") as temp_name:
         work_dir = Path(temp_name)
@@ -110,7 +127,121 @@ def render_master(
         if file.read(12)[4:8] != b"ftyp":
             output_path.unlink(missing_ok=True)
             raise MasterRenderError("rendered_master_is_not_mp4")
-    return MasterRenderResult(size_bytes, _sha256(output_path), duration, width, height)
+    try:
+        quality_report = inspect_master(
+            path=output_path,
+            ffprobe_binary=ffprobe_binary,
+            expected_duration=duration,
+            expected_width=width,
+            expected_height=height,
+        )
+    except MasterRenderError:
+        output_path.unlink(missing_ok=True)
+        raise
+    return MasterRenderResult(
+        size_bytes,
+        _sha256(output_path),
+        quality_report["actual_duration_seconds"],
+        width,
+        height,
+        quality_report,
+    )
+
+
+def inspect_master(
+    *,
+    path: Path,
+    ffprobe_binary: str,
+    expected_duration: float,
+    expected_width: int,
+    expected_height: int,
+) -> dict:
+    executable = shutil.which(ffprobe_binary)
+    if not executable:
+        raise MasterRenderError("ffprobe_unavailable")
+    command = [
+        executable,
+        "-v",
+        "error",
+        "-count_packets",
+        "-show_entries",
+        "format=format_name,duration:stream=codec_type,codec_name,width,height,duration,nb_read_packets",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=300, check=False)
+    except subprocess.TimeoutExpired as error:
+        raise MasterRenderError("ffprobe_quality_check_timed_out") from error
+    except OSError as error:
+        raise MasterRenderError("ffprobe_execution_failed") from error
+    if result.returncode != 0:
+        raise MasterRenderError("ffprobe_quality_check_failed")
+    try:
+        payload = json.loads(result.stdout)
+        streams = payload["streams"]
+        container = payload["format"]
+        actual_duration = float(container["duration"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise MasterRenderError("ffprobe_metadata_invalid") from error
+    if not isinstance(streams, list) or not isinstance(container, dict):
+        raise MasterRenderError("ffprobe_metadata_invalid")
+    if not all(isinstance(stream, dict) for stream in streams):
+        raise MasterRenderError("ffprobe_metadata_invalid")
+    if "mp4" not in container.get("format_name", "").split(","):
+        raise MasterRenderError("master_container_is_not_mp4")
+    videos = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audios = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    subtitles = [stream for stream in streams if stream.get("codec_type") == "subtitle"]
+    if len(videos) != 1 or len(audios) != 1 or len(subtitles) != 1:
+        raise MasterRenderError("master_required_streams_invalid")
+    video, audio, subtitle = videos[0], audios[0], subtitles[0]
+    if (
+        video.get("codec_name") != "h264"
+        or video.get("width") != expected_width
+        or video.get("height") != expected_height
+    ):
+        raise MasterRenderError("master_video_stream_invalid")
+    if audio.get("codec_name") != "aac" or subtitle.get("codec_name") != "mov_text":
+        raise MasterRenderError("master_audio_or_subtitle_stream_invalid")
+    if any(_packet_count(stream.get("nb_read_packets")) < 1 for stream in (video, audio, subtitle)):
+        raise MasterRenderError("master_stream_contains_no_packets")
+    video_duration = _stream_duration(video, actual_duration)
+    audio_duration = _stream_duration(audio, actual_duration)
+    duration_tolerance = max(0.5, expected_duration * 0.01)
+    duration_delta = abs(video_duration - expected_duration)
+    if any(
+        duration <= 0 or abs(duration - expected_duration) > duration_tolerance
+        for duration in (actual_duration, video_duration, audio_duration)
+    ):
+        raise MasterRenderError("master_duration_outside_tolerance")
+    if abs(video_duration - audio_duration) > duration_tolerance:
+        raise MasterRenderError("master_audio_video_duration_mismatch")
+    return {
+        "passed": True,
+        "container": "mp4",
+        "actual_duration_seconds": video_duration,
+        "container_duration_seconds": actual_duration,
+        "audio_duration_seconds": audio_duration,
+        "expected_duration_seconds": expected_duration,
+        "duration_delta_seconds": round(duration_delta, 3),
+        "duration_tolerance_seconds": round(max(0.5, expected_duration * 0.01), 3),
+        "video": {
+            "codec": video["codec_name"],
+            "width": video["width"],
+            "height": video["height"],
+            "packets_read": _packet_count(video["nb_read_packets"]),
+        },
+        "audio": {
+            "codec": audio["codec_name"],
+            "packets_read": _packet_count(audio["nb_read_packets"]),
+        },
+        "subtitle": {
+            "codec": subtitle["codec_name"],
+            "packets_read": _packet_count(subtitle["nb_read_packets"]),
+        },
+    }
 
 
 def _extract_package(package_path: Path, work_dir: Path) -> dict:
@@ -267,6 +398,20 @@ def _positive_number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise MasterRenderError("edit_package_shot_duration_invalid")
     return float(value)
+
+
+def _packet_count(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _stream_duration(stream: dict, fallback: float) -> float:
+    try:
+        return float(stream.get("duration", fallback))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _align_audio_to_subtitles(audio_clips: list, subtitle_path: Path) -> list[dict]:

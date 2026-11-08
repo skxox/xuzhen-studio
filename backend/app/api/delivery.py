@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..domain.models import DeliveryMaster, EditPackage, StageState
-from ..services.ffmpeg_master import MasterRenderError, ffmpeg_available, render_master
+from ..services.ffmpeg_master import (
+    MasterRenderError,
+    ffmpeg_available,
+    ffprobe_available,
+    render_master,
+)
 from .common import audit, get_db, project_or_404
 
 router = APIRouter()
@@ -15,14 +20,18 @@ router = APIRouter()
 
 @router.get("/delivery/runtime")
 def get_delivery_runtime():
-    available = ffmpeg_available(settings.ffmpeg_binary)
+    ffmpeg_ok = ffmpeg_available(settings.ffmpeg_binary)
+    ffprobe_ok = ffprobe_available(settings.ffprobe_binary)
+    available = ffmpeg_ok and ffprobe_ok
     return {
         "master_render_available": available,
+        "ffmpeg_available": ffmpeg_ok,
+        "ffprobe_available": ffprobe_ok,
         "message": (
             None
             if available
             else (
-                "未检测到可用的 FFmpeg（需包含 libx264、aac 和 mov_text 编码器）。"
+                "最终成片需要 FFmpeg（libx264、aac、mov_text）和 FFprobe。"
                 "macOS 可运行 brew install ffmpeg，然后重启 API 服务。"
             )
         ),
@@ -89,11 +98,12 @@ def create_delivery_master(project_id: str, db: Session = Depends(get_db)):
             output_path=output_path,
             aspect_ratio=project.aspect_ratio,
             ffmpeg_binary=settings.ffmpeg_binary,
+            ffprobe_binary=settings.ffprobe_binary,
             expected_package_sha256=package.sha256,
         )
     except MasterRenderError as error:
         output_path.unlink(missing_ok=True)
-        if str(error) == "ffmpeg_unavailable":
+        if str(error) in {"ffmpeg_unavailable", "ffprobe_unavailable"}:
             raise HTTPException(503, str(error)) from None
         stage.status = "failed"
         stage.version += 1
@@ -126,6 +136,7 @@ def create_delivery_master(project_id: str, db: Session = Depends(get_db)):
                 "audio_bitrate": "192k",
                 "subtitle_codec": "mov_text",
             },
+            "quality_report": result.quality_report,
         },
     )
     db.add(master)
@@ -145,6 +156,7 @@ def create_delivery_master(project_id: str, db: Session = Depends(get_db)):
             "size_bytes": master.size_bytes,
             "sha256": master.sha256,
             "duration_seconds": master.duration_seconds,
+            "quality_passed": result.quality_report["passed"],
         },
     )
     db.commit()

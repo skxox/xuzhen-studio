@@ -283,7 +283,10 @@ export interface DeliveryMaster {
   duration_seconds: number;
   width: number;
   height: number;
-  source_snapshot: Record<string, unknown>;
+  source_snapshot: {
+    quality_report?: MasterQualityReport;
+    [key: string]: unknown;
+  };
   status: 'needs_review' | 'accepted' | 'rejected';
   created_at: string;
   file_url: string;
@@ -291,7 +294,23 @@ export interface DeliveryMaster {
 
 export interface DeliveryRuntime {
   master_render_available: boolean;
+  ffmpeg_available: boolean;
+  ffprobe_available: boolean;
   message: string | null;
+}
+
+export interface MasterQualityReport {
+  passed: boolean;
+  container: string;
+  actual_duration_seconds: number;
+  container_duration_seconds: number;
+  audio_duration_seconds: number;
+  expected_duration_seconds: number;
+  duration_delta_seconds: number;
+  duration_tolerance_seconds: number;
+  video: { codec: string; width: number; height: number; packets_read: number };
+  audio: { codec: string; packets_read: number };
+  subtitle: { codec: string; packets_read: number };
 }
 
 export interface ApiHealth {

@@ -34,7 +34,7 @@ cp .env.example .env
 uv run uvicorn app.main:app --reload
 ```
 
-API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧；对白配音使用 OpenAI-compatible `/v1/audio/speech`，按已锁定剧本逐句生成、试听并验收。所有镜头和对白均验收后才解锁后期。剪辑交接包包含视频、对白 SRT、逐句音频和来源 manifest；验收后可以使用 FFmpeg 合成带对白音频及中文字幕轨的 MP4 母版，并在工作台审片、验收和下载。母版按请求时长和估算字幕位置生成，仍需人工检查音画同步；FFmpeg 渲染和打包目前在 API 请求中同步执行。安装包含 `libx264`、`aac`、`mov_text` 编码器的 FFmpeg，并按需设置 `XZ_FFMPEG_BINARY`。视频/语音服务商必须实际实现相应协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持媒体生成。当前由前端轮询驱动生成任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
+API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧；对白配音使用 OpenAI-compatible `/v1/audio/speech`，按已锁定剧本逐句生成、试听并验收。所有镜头和对白均验收后才解锁后期。剪辑交接包包含视频、对白 SRT、逐句音频和来源 manifest；验收后可以使用 FFmpeg 合成带对白音频及中文字幕轨的 MP4 母版，并在工作台审片、验收和下载。FFprobe 自动检查 MP4/H.264/AAC/字幕轨、流数据包和实测时长偏差；对白 cue 位置仍按估算，需人工审片。FFmpeg 渲染和检查、打包目前在 API 请求中同步执行。安装包含 `libx264`、`aac`、`mov_text` 编码器的 FFmpeg 及 FFprobe，并按需设置 `XZ_FFMPEG_BINARY`、`XZ_FFPROBE_BINARY`。视频/语音服务商必须实际实现相应协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持媒体生成。当前由前端轮询驱动生成任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
 
 ## 代码质量
 

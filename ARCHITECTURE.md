@@ -1,5 +1,7 @@
 # 叙帧技术架构（MVP 基线）
 
+产品目标、功能门禁和按依赖拆分的委派任务见 [生产平台功能规格](docs/product/production-platform-spec.md) 与 [开发路线图](docs/product/development-roadmap.md)。
+
 ## 决策摘要
 
 - **语言与框架：Python 3.11+、FastAPI、Pydantic 2、SQLAlchemy 2。** AI 编排、文档抽取、媒体处理及供应商 SDK 主要集中在 Python 生态；FastAPI 同时提供 OpenAPI 文档，便于原型前端和后续客户端共用契约。

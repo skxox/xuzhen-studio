@@ -7,11 +7,11 @@ import { Field } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
 import { api } from '../lib/api';
 import { persistedShotPrompt } from '../lib/shotPrompts';
+import { useShotPromptDrafts } from '../lib/useShotPromptDrafts';
 import type { Project, ShotPlanRelease, VideoCandidate } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
 type ShotRef = { episode_number: number; scene_number: number; shot_number: number; shot: Shot };
-type PromptDrafts = Record<string, string>;
 const keyOf = (shot: Pick<ShotRef, 'episode_number' | 'scene_number' | 'shot_number'>) =>
   `${shot.episode_number}:${shot.scene_number}:${shot.shot_number}`;
 const promptDraftKey = (planId: string | undefined, shotKey: string) =>
@@ -24,7 +24,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>({});
+  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts('video');
   const [seconds, setSeconds] = useState(6);
   const [size, setSize] = useState('1280x720');
   const [reason, setReason] = useState('');
@@ -372,7 +372,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                     label="视频提示词"
                     hint={
                       currentPromptDraft !== undefined && currentPromptDraft !== savedPrompt
-                        ? '未提交的本地草稿；切换镜头会保留，任务创建成功后随任务快照保存。'
+                        ? '未提交的本地草稿；切换镜头、离开页面或刷新后仍保留在当前标签页。'
                         : savedPrompt
                           ? '当前显示最近生成任务保存的提示词；修改后会成为本地草稿。'
                           : '以分镜动作与运镜作为默认提示，可在本次任务中调整，不改动锁定分镜。'

@@ -7,11 +7,11 @@ import { Field } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
 import { api } from '../lib/api';
 import { persistedShotPrompt } from '../lib/shotPrompts';
+import { useShotPromptDrafts } from '../lib/useShotPromptDrafts';
 import type { Project, ShotPlanRelease } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
 type ShotRef = { episode_number: number; scene_number: number; shot_number: number; shot: Shot };
-type PromptDrafts = Record<string, string>;
 
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
@@ -34,7 +34,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const [profileId, setProfileId] = useState('');
   const [consent, setConsent] = useState(false);
   const [selectedKey, setSelectedKey] = useState('');
-  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>({});
+  const [promptDrafts, setPromptDrafts] = useShotPromptDrafts('keyframes');
   const [size, setSize] = useState('1024x1024');
   const [reason, setReason] = useState('');
   const stagesQuery = useQuery({
@@ -331,7 +331,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                     label="生成提示词"
                     hint={
                       currentPromptDraft !== undefined && currentPromptDraft !== savedPrompt
-                        ? '未提交的本地草稿；切换镜头会保留，生成成功后随任务快照保存。'
+                        ? '未提交的本地草稿；切换镜头、离开页面或刷新后仍保留在当前标签页。'
                         : savedPrompt
                           ? '当前显示最近生成任务保存的提示词；修改后会成为本地草稿。'
                           : '允许为本次关键帧覆盖分镜提示词；分镜版本本身不会被修改。'

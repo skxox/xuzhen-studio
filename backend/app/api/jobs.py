@@ -6,12 +6,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..domain.models import (
+    Chapter,
     GenerationJob,
     GenerationOutput,
     GenerationOutputVersion,
     ServiceProfile,
     StageState,
 )
+from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
 from .common import (
     audit,
@@ -32,7 +34,7 @@ router = APIRouter()
 
 @router.post("/projects/{project_id}/jobs", status_code=202)
 def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
+    project = project_or_404(db, project_id)
     existing = db.scalar(
         select(GenerationJob).where(
             GenerationJob.project_id == project_id,
@@ -57,6 +59,18 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         raise HTTPException(404, "stage_not_found")
     if stage.status != "running":
         raise HTTPException(409, f"stage_must_be_running_before_generation:{stage.status}")
+    if data.stage_key == "novelDraft":
+        ordinal = data.scope.get("chapter_ordinal")
+        if project.creation_mode != "original":
+            raise HTTPException(422, "novel_draft_requires_original_project")
+        if type(ordinal) is not int or ordinal < 1:
+            raise HTTPException(422, "novel_chapter_ordinal_required")
+        existing_ordinals = db.scalars(
+            select(Chapter.ordinal).where(Chapter.project_id == project_id)
+        ).all()
+        highest_ordinal = max(existing_ordinals, default=0)
+        if ordinal > highest_ordinal + 1:
+            raise HTTPException(422, "novel_chapter_sequence_cannot_skip_ahead")
     if not data.data_authorized:
         raise HTTPException(422, "model_data_processing_consent_required")
     supported = data.modality == "text" and profile.adapter_id == "openai-compatible-chat"
@@ -71,6 +85,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "prompt": data.prompt,
                 "parameters": data.parameters,
                 "input_refs": data.input_refs,
+                "scope": data.scope,
                 "data_authorized": data.data_authorized,
             },
             provider_snapshot={
@@ -137,6 +152,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             "prompt": data.prompt,
             "parameters": data.parameters,
             "input_refs": data.input_refs,
+            "scope": data.scope,
             "data_authorized": data.data_authorized,
             "stage_version": stage.version,
         },
@@ -242,6 +258,35 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             "provider_snapshot": job.provider_snapshot,
         }
     db.expire_all()
+    if data.stage_key == "novelDraft":
+        try:
+            expected_ordinal = data.scope.get("chapter_ordinal")
+            if not isinstance(expected_ordinal, int) or expected_ordinal < 1:
+                raise NovelDraftCandidateError("章节任务缺少有效的目标序号。")
+            parse_chapter_candidate(content, expected_ordinal)
+        except NovelDraftCandidateError as error:
+            stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
+                )
+            )
+            job.status = "failed"
+            job.error = {"code": "invalid_novel_chapter_candidate", "message": str(error)}
+            if (
+                stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+            ):
+                stage.status = "failed"
+                stage.version += 1
+            audit(db, project_id, "job.failed", job.id, job.error)
+            db.commit()
+            return {
+                "id": job.id,
+                "status": job.status,
+                "error": job.error,
+                "provider_snapshot": job.provider_snapshot,
+            }
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
@@ -250,7 +295,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
     output = GenerationOutput(
         project_id=project_id,
         job_id=job.id,
-        content_type="text/markdown",
+        content_type="application/json" if data.stage_key == "novelDraft" else "text/markdown",
         content=content,
         metadata_json={"usage": usage},
     )
@@ -353,6 +398,14 @@ def edit_generation_output(
         raise HTTPException(409, "generation_output_revision_conflict")
     if stage.status != "needs_review" or (stage.decision or {}).get("candidate_job_id") != job_id:
         raise HTTPException(409, "generation_candidate_is_not_current")
+    if job.stage_key == "novelDraft":
+        expected_ordinal = (job.input_snapshot.get("scope") or {}).get("chapter_ordinal")
+        try:
+            if not isinstance(expected_ordinal, int):
+                raise NovelDraftCandidateError("章节任务缺少有效的目标序号。")
+            parse_chapter_candidate(data.content, expected_ordinal)
+        except NovelDraftCandidateError as error:
+            raise HTTPException(422, str(error)) from None
     db.add(
         GenerationOutputVersion(
             output_id=output.id,
@@ -431,6 +484,7 @@ def replay_generation_job(db: Session, job: GenerationJob, data: JobCreate) -> d
         or job.input_snapshot.get("prompt") != data.prompt
         or job.input_snapshot.get("parameters", {}) != data.parameters
         or job.input_snapshot.get("input_refs", []) != data.input_refs
+        or job.input_snapshot.get("scope", {}) != data.scope
         or job.input_snapshot.get("data_authorized", False) != data.data_authorized
         or job.provider_snapshot.get("profile_id") != data.profile_id
     ):

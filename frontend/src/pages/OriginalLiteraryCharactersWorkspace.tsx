@@ -236,6 +236,11 @@ export function OriginalLiteraryCharactersWorkspace({ project }: { project?: Pro
           <Link className="text-link" to="/writing">
             <ArrowLeft size={14} /> 返回长篇大纲
           </Link>
+          {characterStage?.status === 'accepted' && (
+            <Link className="text-link" to="/writing/chapters">
+              <Sparkles size={14} /> 前往逐章正文工作台
+            </Link>
+          )}
         </Panel>
         <Panel className="outline-generation-card">
           <div className="panel-heading">

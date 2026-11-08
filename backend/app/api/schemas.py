@@ -137,6 +137,7 @@ class JobCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     parameters: dict = Field(default_factory=dict)
     input_refs: list[str] = Field(default_factory=list, max_length=100)
+    scope: dict[str, str | int] = Field(default_factory=dict)
     data_authorized: bool = False
 
     @field_validator("prompt", mode="before")

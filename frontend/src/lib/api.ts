@@ -110,6 +110,7 @@ export const api = {
       prompt: string;
       parameters: Record<string, unknown>;
       input_refs: string[];
+      scope?: Record<string, string | number>;
       data_authorized: boolean;
     },
   ) =>

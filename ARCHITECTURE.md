@@ -45,7 +45,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 ## 数据与安全
 
 - 原文和用户媒体使用对象存储；数据库只存元数据、版本、哈希与受控 URI。
-- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。当前通过后端 `XZ_PROVIDER_SECRETS` 环境配置解析 `secret_ref`；尚未接入独立密钥库/加密主密钥。OpenAI 兼容文本档案会检查 `/models`，原创“故事圣经”“长篇大纲”和“文学角色圣经”使用 `/chat/completions` 生成候选；远程 API 默认阻止非公网 IP 目标。身份认证上线前，不允许远端客户端触发带密钥的连通检查。
+- Provider 密钥不得进入浏览器持久化、日志、任务快照和导出包。当前通过后端 `XZ_PROVIDER_SECRETS` 环境配置解析 `secret_ref`；尚未接入独立密钥库/加密主密钥。OpenAI 兼容文本档案会检查 `/models`，原创“故事圣经”“长篇大纲”“文学角色圣经”和逐章正文使用 `/chat/completions` 生成候选；逐章候选校验 JSON 结构与目标序号，只有作者接受后才原子化写入正式章节版本。远程 API 默认阻止非公网 IP 目标。身份认证上线前，不允许远端客户端触发带密钥的连通检查。
 - 上传按扩展名、大小、内容 MIME、哈希校验；生产版还要做恶意文件扫描、压缩炸弹限制与安全下载。
 - 远程 URL 仅 HTTPS；本地 HTTP 仅允许 loopback。生产部署还需配置域名白名单和 DNS/IP 防 SSRF。
 - 改编原文门禁要求记录项目权利状态；每次文本生成还要求显式数据处理授权字段。该授权目前是单用户本地工作区内的请求确认，不是法律权利验证，也不替代后续的身份认证与多用户权限。
@@ -60,7 +60,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 - `GET/PUT /projects/{id}/creative-brief`（仅原创项目；保存简报修订与权利确认声明，并进入作者确认门禁）
 - `GET/POST /projects/{id}/character-references`（角色锚点、服装规则与固定四视图清单；仅保存草稿，不生成图片）
 - `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（目前仅 OpenAI 兼容文本服务）
-- `POST/GET /projects/{id}/jobs`、`PUT /projects/{id}/jobs/{job_id}/output`、`GET /projects/{id}/jobs/{job_id}/output/versions`（当前原创故事圣经、长篇大纲和文学角色圣经支持真实文本生成；请求需数据处理授权并要求阶段处于 running；候选可人工修订并保留旧版本）
+- `POST/GET /projects/{id}/jobs`、`PUT /projects/{id}/jobs/{job_id}/output`、`GET /projects/{id}/jobs/{job_id}/output/versions`（原创故事圣经、长篇大纲、文学角色圣经和逐章正文支持真实文本生成；正文任务绑定章节序号；请求需数据处理授权并要求阶段处于 running；候选可人工修订并保留旧版本）
 - Swagger UI：`/docs`
 
 后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
@@ -80,7 +80,7 @@ uv run uvicorn app.main:app --reload
 
 ### M0：领域 API 基础（当前）
 
-项目双入口和不同阶段路径、章节导入/修订/恢复、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经、长篇大纲与文学角色圣经文本候选、任务快照、输出持久化和审计事件。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
+项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经/长篇大纲/文学角色圣经文本候选、任务快照、输出持久化和审计事件。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
 
 ### M1：创作纵切片
 

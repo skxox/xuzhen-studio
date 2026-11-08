@@ -43,6 +43,11 @@ const OriginalLiteraryCharactersWorkspace = lazy(() =>
     ({ OriginalLiteraryCharactersWorkspace: page }) => ({ default: page }),
   ),
 );
+const OriginalNovelDraftWorkspace = lazy(() =>
+  import('../pages/OriginalNovelDraftWorkspace').then(({ OriginalNovelDraftWorkspace: page }) => ({
+    default: page,
+  })),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -357,8 +362,12 @@ function AppShell() {
   const location = useLocation();
   const title =
     pageTitles[location.pathname] ??
-    (location.pathname === '/writing'
-      ? '故事与剧本'
+    (location.pathname.startsWith('/writing')
+      ? location.pathname === '/writing/chapters'
+        ? '逐章正文'
+        : location.pathname === '/writing/characters'
+          ? '文学角色圣经'
+          : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -409,6 +418,10 @@ function AppShell() {
               <Route
                 path="/writing/characters"
                 element={<OriginalLiteraryCharactersWorkspace project={project} />}
+              />
+              <Route
+                path="/writing/chapters"
+                element={<OriginalNovelDraftWorkspace project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

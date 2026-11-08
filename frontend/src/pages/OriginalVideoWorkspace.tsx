@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Field } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
 import { api } from '../lib/api';
+import { persistedShotPrompt } from '../lib/shotPrompts';
 import type { Project, ShotPlanRelease, VideoCandidate } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
@@ -31,6 +32,15 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
     queryKey: ['stages', projectId],
     queryFn: () => api.stages(projectId!),
     enabled: Boolean(projectId),
+  });
+  const jobsQuery = useQuery({
+    queryKey: ['jobs', projectId],
+    queryFn: () => api.jobs(projectId!),
+    enabled: Boolean(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.some((job) => job.stage_key === 'video' && job.status === 'running')
+        ? 2500
+        : false,
   });
   const plansQuery = useQuery({
     queryKey: ['shot-plan-releases', projectId],
@@ -111,12 +121,21 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
   const currentDraftKey = promptDraftKey(plan?.id, currentKey);
   const currentPromptDraft = promptDrafts[currentDraftKey];
   const keyframe = focus ? acceptedFrames.get(currentKey) : undefined;
+  const persistedPrompt = persistedShotPrompt(jobsQuery.data, 'video', plan?.id, focus);
+  const savedCandidate = candidates.find(
+    (item) =>
+      keyOf(item) === currentKey &&
+      item.shot_plan_release_id === plan?.id &&
+      item.status !== 'superseded',
+  );
+  const savedPrompt = persistedPrompt ?? savedCandidate?.prompt;
   const prompt =
     currentPromptDraft !== undefined
       ? currentPromptDraft
-      : focus
-        ? `${focus.shot.visual_prompt}\n\nMotion: ${focus.shot.visible_action}. Camera: ${focus.shot.camera_movement}. Transition: ${focus.shot.transition}.\n\nAvoid: ${focus.shot.negative_prompt}`
-        : '';
+      : (savedPrompt ??
+        (focus
+          ? `${focus.shot.visual_prompt}\n\nMotion: ${focus.shot.visible_action}. Camera: ${focus.shot.camera_movement}. Transition: ${focus.shot.transition}.\n\nAvoid: ${focus.shot.negative_prompt}`
+          : ''));
   const running =
     stage?.status === 'running' ||
     candidates.some((item) => ['queued', 'processing'].includes(item.status));
@@ -161,13 +180,8 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
         data_authorized: consent,
       });
     },
-    onSuccess: async (_result, { draftKey }) => {
+    onSuccess: async () => {
       setConsent(false);
-      setPromptDrafts((drafts) => {
-        const nextDrafts = { ...drafts };
-        delete nextDrafts[draftKey];
-        return nextDrafts;
-      });
       await refresh();
     },
     onError: refresh,
@@ -197,6 +211,7 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
         keyOf(item) === currentKey &&
         item.shot_plan_release_id === plan?.id,
     );
+  const reviewCandidate = currentCandidate;
   return (
     <div className="workspace-page">
       <PageHeading
@@ -356,9 +371,11 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                   <Field
                     label="视频提示词"
                     hint={
-                      currentPromptDraft !== undefined
+                      currentPromptDraft !== undefined && currentPromptDraft !== savedPrompt
                         ? '未提交的本地草稿；切换镜头会保留，任务创建成功后随任务快照保存。'
-                        : '以分镜动作与运镜作为默认提示，可在本次任务中调整，不改动锁定分镜。'
+                        : savedPrompt
+                          ? '当前显示最近生成任务保存的提示词；修改后会成为本地草稿。'
+                          : '以分镜动作与运镜作为默认提示，可在本次任务中调整，不改动锁定分镜。'
                     }
                   >
                     <textarea
@@ -380,11 +397,11 @@ export function OriginalVideoWorkspace({ project }: { project?: Project }) {
                       alt="已验收关键帧"
                     />
                   )}
-                  {currentCandidate?.file_url && (
+                  {reviewCandidate?.file_url && (
                     <video
                       className="keyframe-preview"
                       controls
-                      src={api.videoFileUrl(projectId!, currentCandidate.id)}
+                      src={api.videoFileUrl(projectId!, reviewCandidate.id)}
                     />
                   )}
                   {inProgress && (

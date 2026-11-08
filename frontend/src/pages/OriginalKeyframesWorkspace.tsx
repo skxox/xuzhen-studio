@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Field } from '../components/ui/Field';
 import { PageHeading, Panel } from '../components/ui/Panel';
 import { api } from '../lib/api';
+import { persistedShotPrompt } from '../lib/shotPrompts';
 import type { Project, ShotPlanRelease } from '../lib/types';
 
 type Shot = ShotPlanRelease['episodes'][number]['scenes'][number]['shots'][number];
@@ -103,12 +104,29 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
   const currentKey = focus ? refKey(focus) : '';
   const currentDraftKey = promptDraftKey(plan?.id, currentKey);
   const currentPromptDraft = promptDrafts[currentDraftKey];
+  const persistedPrompt = persistedShotPrompt(jobsQuery.data, 'keyframes', plan?.id, focus);
+  const savedCandidate = candidates.find(
+    (item) =>
+      refKey(item) === currentKey &&
+      item.shot_plan_release_id === plan?.id &&
+      item.status !== 'superseded',
+  );
+  const currentCandidate =
+    pending ??
+    (focus
+      ? candidates.find(
+          (item) =>
+            refKey(item) === currentKey &&
+            item.status === 'accepted' &&
+            item.shot_plan_release_id === plan?.id,
+        )
+      : undefined);
+  const savedPrompt = persistedPrompt ?? savedCandidate?.prompt;
   const prompt =
     currentPromptDraft !== undefined
       ? currentPromptDraft
-      : focus
-        ? `${focus.shot.visual_prompt}\n\nAvoid: ${focus.shot.negative_prompt}`
-        : '';
+      : (savedPrompt ??
+        (focus ? `${focus.shot.visual_prompt}\n\nAvoid: ${focus.shot.negative_prompt}` : ''));
   const running =
     stage?.status === 'running' ||
     (jobsQuery.data ?? []).some((job) => job.stage_key === 'keyframes' && job.status === 'running');
@@ -153,13 +171,8 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
         data_authorized: consent,
       });
     },
-    onSuccess: async (_result, { draftKey }) => {
+    onSuccess: async () => {
       setConsent(false);
-      setPromptDrafts((drafts) => {
-        const nextDrafts = { ...drafts };
-        delete nextDrafts[draftKey];
-        return nextDrafts;
-      });
       await refresh();
     },
     onError: refresh,
@@ -183,16 +196,7 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
     (item) => item.stage_key === 'keyframes' && ['failed', 'blocked'].includes(item.status),
   );
   const jobError = failedJob?.error?.message ?? failedJob?.error?.code;
-  const currentCandidate =
-    pending ??
-    (focus
-      ? candidates.find(
-          (item) =>
-            refKey(item) === currentKey &&
-            item.status === 'accepted' &&
-            item.shot_plan_release_id === plan?.id,
-        )
-      : undefined);
+  const reviewCandidate = currentCandidate;
   const canRegenerateSelected = selectedKey === currentKey && accepted.has(currentKey);
   return (
     <div className="workspace-page">
@@ -326,9 +330,11 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                   <Field
                     label="生成提示词"
                     hint={
-                      currentPromptDraft !== undefined
+                      currentPromptDraft !== undefined && currentPromptDraft !== savedPrompt
                         ? '未提交的本地草稿；切换镜头会保留，生成成功后随任务快照保存。'
-                        : '允许为本次关键帧覆盖分镜提示词；分镜版本本身不会被修改。'
+                        : savedPrompt
+                          ? '当前显示最近生成任务保存的提示词；修改后会成为本地草稿。'
+                          : '允许为本次关键帧覆盖分镜提示词；分镜版本本身不会被修改。'
                     }
                   >
                     <textarea
@@ -343,11 +349,11 @@ export function OriginalKeyframesWorkspace({ project }: { project?: Project }) {
                       }
                     />
                   </Field>
-                  {currentCandidate && (
+                  {reviewCandidate && (
                     <img
                       className="keyframe-preview"
-                      src={api.keyframeFileUrl(projectId!, currentCandidate.id)}
-                      alt={`第${currentCandidate.episode_number}集第${currentCandidate.scene_number}场镜头${currentCandidate.shot_number}关键帧`}
+                      src={api.keyframeFileUrl(projectId!, reviewCandidate.id)}
+                      alt={`第${reviewCandidate.episode_number}集第${reviewCandidate.scene_number}场镜头${reviewCandidate.shot_number}关键帧`}
                     />
                   )}
                   {focus &&

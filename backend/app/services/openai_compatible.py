@@ -18,7 +18,9 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         self.target_ip = target_ip
 
     def connect(self):
-        self.sock = socket.create_connection((self.target_ip, self.port), self.timeout, self.source_address)
+        self.sock = socket.create_connection(
+            (self.target_ip, self.port), self.timeout, self.source_address
+        )
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -27,7 +29,9 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self.target_ip = target_ip
 
     def connect(self):
-        sock = socket.create_connection((self.target_ip, self.port), self.timeout, self.source_address)
+        sock = socket.create_connection(
+            (self.target_ip, self.port), self.timeout, self.source_address
+        )
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
@@ -37,7 +41,7 @@ def _completion_url(endpoint: str) -> str:
     if path.endswith("/chat/completions"):
         return endpoint
     if path.endswith("/models"):
-        path = path[:-len("/models")]
+        path = path[: -len("/models")]
     if not path.endswith("/v1"):
         path = f"{path}/v1"
     return f"{parsed.scheme}://{parsed.netloc}{path}/chat/completions"
@@ -54,27 +58,45 @@ def complete_chat(
     parsed = urlsplit(_completion_url(endpoint))
     if not parsed.hostname or parsed.query or parsed.fragment:
         raise ProviderExecutionError("provider_endpoint_invalid", 422)
-    allowed = {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
+    allowed = {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "presence_penalty",
+        "frequency_penalty",
+        "seed",
+        "stop",
+    }
     unknown = set(parameters) - allowed
     if unknown:
         raise ProviderExecutionError("unsupported_generation_parameters", 422)
     bounds = {
-        "temperature": (0, 2), "top_p": (0, 1), "max_tokens": (1, 16_384),
-        "presence_penalty": (-2, 2), "frequency_penalty": (-2, 2),
+        "temperature": (0, 2),
+        "top_p": (0, 1),
+        "max_tokens": (1, 16_384),
+        "presence_penalty": (-2, 2),
+        "frequency_penalty": (-2, 2),
     }
     for key, (minimum, maximum) in bounds.items():
         value = parameters.get(key)
-        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
-                                  or key == "max_tokens" and not isinstance(value, int)
-                                  or not minimum <= value <= maximum):
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or key == "max_tokens"
+            and not isinstance(value, int)
+            or not minimum <= value <= maximum
+        ):
             raise ProviderExecutionError(f"invalid_generation_parameter:{key}", 422)
-    if "seed" in parameters and (isinstance(parameters["seed"], bool)
-                                  or not isinstance(parameters["seed"], int)):
+    if "seed" in parameters and (
+        isinstance(parameters["seed"], bool) or not isinstance(parameters["seed"], int)
+    ):
         raise ProviderExecutionError("invalid_generation_parameter:seed", 422)
     stop = parameters.get("stop")
     if stop is not None and not (
-        isinstance(stop, str) and len(stop) <= 256
-        or isinstance(stop, list) and len(stop) <= 4
+        isinstance(stop, str)
+        and len(stop) <= 256
+        or isinstance(stop, list)
+        and len(stop) <= 4
         and all(isinstance(item, str) and len(item) <= 256 for item in stop)
     ):
         raise ProviderExecutionError("invalid_generation_parameter:stop", 422)
@@ -112,7 +134,13 @@ def complete_chat(
     if len(raw) > 4_000_000:
         raise ProviderExecutionError("provider_generation_response_too_large", 502)
     if status != 200:
-        code = "provider_authentication_failed" if status in {401, 403} else "provider_rate_limited" if status == 429 else "provider_generation_rejected"
+        code = (
+            "provider_authentication_failed"
+            if status in {401, 403}
+            else "provider_rate_limited"
+            if status == 429
+            else "provider_generation_rejected"
+        )
         raise ProviderExecutionError(code, 502)
     try:
         response_data = json.loads(raw)
@@ -124,7 +152,9 @@ def complete_chat(
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, list):
         content = "".join(
-            item.get("text", "") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
         )
     if not isinstance(content, str) or not content.strip():
         raise ProviderExecutionError("provider_generation_empty_response", 502)

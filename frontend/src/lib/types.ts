@@ -32,7 +32,13 @@ export interface ApiHealth {
 
 export interface ChapterImportResult {
   filename: string;
-  chapters: Array<{ id: string; ordinal: number; title: string; char_count: number; content_hash: string }>;
+  chapters: Array<{
+    id: string;
+    ordinal: number;
+    title: string;
+    char_count: number;
+    content_hash: string;
+  }>;
   review_required: boolean;
 }
 
@@ -42,7 +48,9 @@ export interface CharacterReference {
   name: string;
   immutable_features: string;
   costume_rules: string;
-  reference_views: Array<'front_full_body' | 'side_full_body' | 'back_full_body' | 'expression_sheet'>;
+  reference_views: Array<
+    'front_full_body' | 'side_full_body' | 'back_full_body' | 'expression_sheet'
+  >;
   status: 'draft' | 'needs_review' | 'accepted' | 'rejected';
   version: number;
   created_at: string;
@@ -72,7 +80,10 @@ export interface CreativeBrief {
   updated_at: string;
 }
 
-export type CreativeBriefSaveInput = Omit<CreativeBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
+export type CreativeBriefSaveInput = Omit<
+  CreativeBrief,
+  'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'
+>;
 
 export interface CommercialBrief {
   id: string;
@@ -94,7 +105,10 @@ export interface CommercialBrief {
   updated_at: string;
 }
 
-export type CommercialBriefSaveInput = Omit<CommercialBrief, 'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'>;
+export type CommercialBriefSaveInput = Omit<
+  CommercialBrief,
+  'id' | 'project_id' | 'revision' | 'status' | 'created_at' | 'updated_at'
+>;
 
 export interface CommercialMaterial {
   id: string;
@@ -116,7 +130,16 @@ export interface StageState {
   responsibility: string;
   expected_output: string;
   depends_on: string[];
-  status: 'not_started' | 'ready' | 'running' | 'needs_review' | 'accepted' | 'waived' | 'blocked' | 'stale' | 'failed';
+  status:
+    | 'not_started'
+    | 'ready'
+    | 'running'
+    | 'needs_review'
+    | 'accepted'
+    | 'waived'
+    | 'blocked'
+    | 'stale'
+    | 'failed';
   version: number;
   stale: boolean;
   decision: Record<string, unknown>;
@@ -129,7 +152,13 @@ export interface GenerationJobSummary {
   status: string;
   input_snapshot: Record<string, unknown>;
   provider_snapshot: Record<string, unknown>;
-  output?: { id: string; content_type: string; content: string; metadata: Record<string, unknown>; revision?: number } | null;
+  output?: {
+    id: string;
+    content_type: string;
+    content: string;
+    metadata: Record<string, unknown>;
+    revision?: number;
+  } | null;
   error: Record<string, unknown>;
   created_at: string;
 }
@@ -144,7 +173,12 @@ export interface ServiceProfile {
   model_id: string;
   secret_ref?: string | null;
   secret_configured?: boolean;
-  connection_test?: { status: 'connected' | 'failed'; model_available: boolean; checked_at: string; error_code?: string } | null;
+  connection_test?: {
+    status: 'connected' | 'failed';
+    model_available: boolean;
+    checked_at: string;
+    error_code?: string;
+  } | null;
   capabilities?: Record<string, unknown>;
   enabled: boolean;
   version: number;

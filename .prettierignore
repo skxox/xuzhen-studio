@@ -1,0 +1,6 @@
+**/node_modules
+**/dist
+**/coverage
+backend/.venv
+backend/var
+pnpm-lock.yaml

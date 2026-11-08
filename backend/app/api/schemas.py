@@ -10,7 +10,9 @@ class ProjectCreate(BaseModel):
     target_episodes: int | None = Field(default=None, ge=1, le=500)
     episode_seconds: int | None = Field(default=None, ge=10, le=7200)
     aspect_ratio: str = "16:9"
-    rights_status: Literal["unconfirmed", "owned", "licensed", "public_domain", "restricted"] = "unconfirmed"
+    rights_status: Literal["unconfirmed", "owned", "licensed", "public_domain", "restricted"] = (
+        "unconfirmed"
+    )
 
 
 class ProjectRightsUpdate(BaseModel):
@@ -88,7 +90,12 @@ class CommercialBriefSave(BaseModel):
     rights_confirmed: bool = False
 
     @field_validator(
-        "product_name", "category", "product_facts", "target_audience", "call_to_action", "distribution_channel",
+        "product_name",
+        "category",
+        "product_facts",
+        "target_audience",
+        "call_to_action",
+        "distribution_channel",
         mode="before",
     )
     @classmethod
@@ -110,7 +117,9 @@ class ServiceProfileCreate(BaseModel):
     transport: Literal["remote_api", "self_hosted_api", "local_runtime"]
     endpoint: HttpUrl
     model_id: str
-    secret_ref: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+    secret_ref: str | None = Field(
+        default=None, min_length=2, max_length=64, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$"
+    )
     capabilities: dict = Field(default_factory=dict)
 
 

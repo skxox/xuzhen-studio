@@ -24,4 +24,4 @@ The profile connection check currently supports the OpenAI-compatible text adapt
 
 Provider checks block non-public IP targets by default. For a self-hosted service on a private network, set `XZ_ALLOW_PRIVATE_PROVIDER_ENDPOINTS=true` only in a trusted local deployment. Loopback endpoints are allowed for local/self-hosted profiles.
 
-When the package index is reachable, run `uv lock` once to generate `uv.lock`, then commit that lock file. CI and reproducible environments should use `uv sync --locked`.
+The checked-in `uv.lock` pins the backend runtime and development tools. Use `uv sync --locked` to create or update the local environment.

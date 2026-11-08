@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -12,7 +12,7 @@ def uid() -> str:
 
 
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Timestamped:
@@ -31,14 +31,20 @@ class Project(Timestamped, Base):
     episode_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="16:9")
     rights_status: Mapped[str] = mapped_column(String(32), default="unconfirmed")
-    chapters: Mapped[list["Chapter"]] = relationship(back_populates="project", cascade="all, delete-orphan")
-    stages: Mapped[list["StageState"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    chapters: Mapped[list["Chapter"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    stages: Mapped[list["StageState"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class Chapter(Timestamped, Base):
     __tablename__ = "chapters"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     ordinal: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text)
@@ -46,19 +52,24 @@ class Chapter(Timestamped, Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     source_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     project: Mapped[Project] = relationship(back_populates="chapters")
-    __table_args__ = (UniqueConstraint("project_id", "ordinal", "version", name="uq_chapter_version"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "ordinal", "version", name="uq_chapter_version"),
+    )
 
 
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     immutable_features: Mapped[str] = mapped_column(Text)
     costume_rules: Mapped[str] = mapped_column(Text)
-    reference_views: Mapped[list[str]] = mapped_column(JSON, default=lambda: [
-        "front_full_body", "side_full_body", "back_full_body", "expression_sheet"
-    ])
+    reference_views: Mapped[list[str]] = mapped_column(
+        JSON,
+        default=lambda: ["front_full_body", "side_full_body", "back_full_body", "expression_sheet"],
+    )
     status: Mapped[str] = mapped_column(String(24), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=1)
 
@@ -66,7 +77,9 @@ class CharacterReference(Timestamped, Base):
 class CreativeBrief(Timestamped, Base):
     __tablename__ = "creative_briefs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
+    )
     premise: Mapped[str] = mapped_column(Text)
     genre: Mapped[str] = mapped_column(String(200))
     target_readers: Mapped[str] = mapped_column(Text)
@@ -82,7 +95,9 @@ class CreativeBrief(Timestamped, Base):
 class CommercialBrief(Timestamped, Base):
     __tablename__ = "commercial_briefs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
+    )
     product_name: Mapped[str] = mapped_column(String(200))
     category: Mapped[str] = mapped_column(String(200))
     product_facts: Mapped[str] = mapped_column(Text)
@@ -101,7 +116,9 @@ class CommercialBrief(Timestamped, Base):
 class CommercialMaterial(Timestamped, Base):
     __tablename__ = "commercial_materials"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     original_name: Mapped[str] = mapped_column(String(300))
     storage_key: Mapped[str] = mapped_column(String(500), unique=True)
     media_kind: Mapped[str] = mapped_column(String(24))
@@ -114,7 +131,9 @@ class CommercialMaterial(Timestamped, Base):
 class StageState(Timestamped, Base):
     __tablename__ = "stage_states"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     stage_key: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(24), default="not_started")
     version: Mapped[int] = mapped_column(Integer, default=0)
@@ -127,7 +146,9 @@ class StageState(Timestamped, Base):
 class ServiceProfile(Timestamped, Base):
     __tablename__ = "service_profiles"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     modality: Mapped[str] = mapped_column(String(16))
     name: Mapped[str] = mapped_column(String(120))
     adapter_id: Mapped[str] = mapped_column(String(80))
@@ -143,7 +164,9 @@ class ServiceProfile(Timestamped, Base):
 class GenerationJob(Timestamped, Base):
     __tablename__ = "generation_jobs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     modality: Mapped[str] = mapped_column(String(16))
     stage_key: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(24), default="queued")
@@ -157,8 +180,12 @@ class GenerationJob(Timestamped, Base):
 class GenerationOutput(Timestamped, Base):
     __tablename__ = "generation_outputs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    job_id: Mapped[str] = mapped_column(ForeignKey("generation_jobs.id", ondelete="CASCADE"), unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="CASCADE"), unique=True, index=True
+    )
     content_type: Mapped[str] = mapped_column(String(120), default="text/plain")
     content: Mapped[str] = mapped_column(Text)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -168,17 +195,23 @@ class GenerationOutput(Timestamped, Base):
 class GenerationOutputVersion(Base):
     __tablename__ = "generation_output_versions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    output_id: Mapped[str] = mapped_column(ForeignKey("generation_outputs.id", ondelete="CASCADE"), index=True)
+    output_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_outputs.id", ondelete="CASCADE"), index=True
+    )
     revision: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (UniqueConstraint("output_id", "revision", name="uq_generation_output_revision"),)
+    __table_args__ = (
+        UniqueConstraint("output_id", "revision", name="uq_generation_output_revision"),
+    )
 
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     event_type: Mapped[str] = mapped_column(String(80))
     entity_ref: Mapped[str] = mapped_column(String(100))
     payload: Mapped[dict] = mapped_column(JSON, default=dict)

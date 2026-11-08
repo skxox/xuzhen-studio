@@ -14,15 +14,45 @@ const stages = [
 ];
 
 export function ProductionStages() {
-  return <div className="production-stages" aria-label="本集制作阶段">
-    {stages.map((stage, index) => <Link key={stage.name} to={stage.to} className={`production-stage production-stage--${stage.state}`}>
-      <span className="production-stage__mark">{stage.state === 'done' ? <Check size={11} /> : stage.state === 'active' ? <Dot size={19} /> : <Circle size={8} />}</span>
-      <span>{stage.name}</span>{index < stages.length - 1 && <i className={`production-stage__line ${stage.state === 'done' ? 'is-done' : ''}`} />}
-    </Link>)}
-    <Badge tone="gold">第 5 / 8 阶段</Badge>
-  </div>;
+  return (
+    <div className="production-stages" aria-label="本集制作阶段">
+      {stages.map((stage, index) => (
+        <Link
+          key={stage.name}
+          to={stage.to}
+          className={`production-stage production-stage--${stage.state}`}
+        >
+          <span className="production-stage__mark">
+            {stage.state === 'done' ? (
+              <Check size={11} />
+            ) : stage.state === 'active' ? (
+              <Dot size={19} />
+            ) : (
+              <Circle size={8} />
+            )}
+          </span>
+          <span>{stage.name}</span>
+          {index < stages.length - 1 && (
+            <i className={`production-stage__line ${stage.state === 'done' ? 'is-done' : ''}`} />
+          )}
+        </Link>
+      ))}
+      <Badge tone="gold">第 5 / 8 阶段</Badge>
+    </div>
+  );
 }
 
 export function StageGateSummary({ label = '分镜门禁' }: { label?: string }) {
-  return <div className="gate-summary"><span className="gate-summary__icon"><Check size={14} /></span><span><b>{label} · 可送审</b><small>4 / 4 个节拍已映射 · 1 项连续性提醒待确认</small></span><ChevronRight size={15} /></div>;
+  return (
+    <div className="gate-summary">
+      <span className="gate-summary__icon">
+        <Check size={14} />
+      </span>
+      <span>
+        <b>{label} · 可送审</b>
+        <small>4 / 4 个节拍已映射 · 1 项连续性提醒待确认</small>
+      </span>
+      <ChevronRight size={15} />
+    </div>
+  );
 }

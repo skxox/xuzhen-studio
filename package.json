@@ -9,6 +9,14 @@
     "dev": "pnpm --filter @xuzhen/studio dev",
     "build": "pnpm --filter @xuzhen/studio build",
     "typecheck": "pnpm --filter @xuzhen/studio typecheck",
-    "lint": "pnpm --filter @xuzhen/studio lint"
+    "lint:frontend": "pnpm --filter @xuzhen/studio lint",
+    "lint:python": "UV_CACHE_DIR=${TMPDIR:-/tmp}/xuzhen-studio-uv-cache uv run --project backend --no-sync ruff check backend/app",
+    "lint": "pnpm lint:frontend && pnpm lint:python",
+    "format:frontend": "pnpm --filter @xuzhen/studio format",
+    "format:frontend:check": "pnpm --filter @xuzhen/studio format:check",
+    "format:python": "UV_CACHE_DIR=${TMPDIR:-/tmp}/xuzhen-studio-uv-cache uv run --project backend --no-sync ruff format backend/app",
+    "format:python:check": "UV_CACHE_DIR=${TMPDIR:-/tmp}/xuzhen-studio-uv-cache uv run --project backend --no-sync ruff format --check backend/app",
+    "format": "pnpm format:frontend && pnpm format:python",
+    "format:check": "pnpm format:frontend:check && pnpm format:python:check"
   }
 }

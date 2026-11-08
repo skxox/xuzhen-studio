@@ -36,6 +36,10 @@ uv run uvicorn app.main:app --reload
 
 API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite；已支持 OpenAI 兼容文本服务连通检查，并可从原创简报依次生成故事圣经与长篇大纲候选。图片、视频和语音仍需对应 Adapter；后台 Worker 与长任务恢复机制尚未完成，见 `ARCHITECTURE.md`。
 
+## 代码质量
+
+仓库统一使用 Prettier 格式化前端、Ruff 格式化和检查 Python。安装依赖后，可在仓库根目录运行 `pnpm format` 自动格式化，`pnpm format:check` 检查格式，`pnpm lint` 检查前后端，`pnpm typecheck` 检查 TypeScript。提交代码前请阅读 [工程质量规范](docs/skills/code-quality/SKILL.md)；新增模块应职责单一，避免继续堆入超长页面或路由文件。
+
 ## 产品原则
 
 AI 先提出内容和执行计划，用户逐阶段审阅、修改、接受或退回。已有原著的事实需保留出处；原创小说逐阶段形成并锁版；两条路径都须通过当前版本的分集剧本验收后，才能进入共用分镜、图像、视频、后期和交付流程。阶段、候选、任务、版本和修订按项目/分集隔离。

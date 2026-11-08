@@ -50,6 +50,7 @@ from .common import (
     get_db,
     project_or_404,
 )
+from .job_serialization import safe_generation_output
 from .provider_security import (
     resolve_provider_secret,
     validate_provider_target,
@@ -1241,70 +1242,6 @@ def _video_job_result(job: GenerationJob, candidate: VideoCandidate) -> dict:
     }
 
 
-@router.get("/projects/{project_id}/jobs")
-def list_jobs(project_id: str, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
-    rows = db.scalars(
-        select(GenerationJob)
-        .where(GenerationJob.project_id == project_id)
-        .order_by(GenerationJob.created_at.desc())
-        .limit(20)
-    ).all()
-    outputs = {
-        item.job_id: item
-        for item in db.scalars(
-            select(GenerationOutput).where(
-                GenerationOutput.project_id == project_id,
-                GenerationOutput.job_id.in_([job.id for job in rows]),
-            )
-        ).all()
-    }
-    return [
-        {
-            "id": j.id,
-            "modality": j.modality,
-            "stage_key": j.stage_key,
-            "status": j.status,
-            "input_snapshot": j.input_snapshot,
-            "provider_snapshot": j.provider_snapshot,
-            "output": safe_generation_output(outputs[j.id]) if j.id in outputs else None,
-            "error": j.error,
-            "created_at": j.created_at,
-        }
-        for j in rows
-    ]
-
-
-@router.get("/projects/{project_id}/jobs/{job_id}")
-def get_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
-    job = db.scalar(
-        select(GenerationJob).where(
-            GenerationJob.id == job_id,
-            GenerationJob.project_id == project_id,
-        )
-    )
-    if not job:
-        raise HTTPException(404, "generation_job_not_found")
-    output = db.scalar(
-        select(GenerationOutput).where(
-            GenerationOutput.project_id == project_id,
-            GenerationOutput.job_id == job_id,
-        )
-    )
-    return {
-        "id": job.id,
-        "modality": job.modality,
-        "stage_key": job.stage_key,
-        "status": job.status,
-        "input_snapshot": job.input_snapshot,
-        "provider_snapshot": job.provider_snapshot,
-        "output": safe_generation_output(output) if output else None,
-        "error": job.error,
-        "created_at": job.created_at,
-    }
-
-
 @router.put("/projects/{project_id}/jobs/{job_id}/output")
 def edit_generation_output(
     project_id: str, job_id: str, data: GenerationOutputEdit, db: Session = Depends(get_db)
@@ -1466,47 +1403,6 @@ def edit_generation_output(
         raise HTTPException(409, "generation_output_revision_conflict") from None
     db.refresh(output)
     return safe_generation_output(output)
-
-
-@router.get("/projects/{project_id}/jobs/{job_id}/output/versions")
-def list_generation_output_versions(project_id: str, job_id: str, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
-    job = db.scalar(
-        select(GenerationJob).where(
-            GenerationJob.id == job_id, GenerationJob.project_id == project_id
-        )
-    )
-    if not job:
-        raise HTTPException(404, "generation_job_not_found")
-    output = db.scalar(
-        select(GenerationOutput).where(
-            GenerationOutput.job_id == job_id, GenerationOutput.project_id == project_id
-        )
-    )
-    if not output:
-        raise HTTPException(404, "generation_output_not_found")
-    versions = db.scalars(
-        select(GenerationOutputVersion)
-        .where(GenerationOutputVersion.output_id == output.id)
-        .order_by(GenerationOutputVersion.revision.desc())
-    ).all()
-    return [
-        {"revision": item.revision, "content": item.content, "created_at": item.created_at}
-        for item in versions
-    ] + [{"revision": output.revision, "content": output.content, "created_at": output.updated_at}]
-
-
-def safe_generation_output(item: GenerationOutput) -> dict:
-    return {
-        "id": item.id,
-        "job_id": item.job_id,
-        "content_type": item.content_type,
-        "content": item.content,
-        "metadata": item.metadata_json,
-        "revision": item.revision,
-        "created_at": item.created_at,
-        "updated_at": item.updated_at,
-    }
 
 
 def _latest_chapters(db: Session, project_id: str) -> dict[int, Chapter]:

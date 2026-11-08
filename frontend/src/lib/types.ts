@@ -25,6 +25,28 @@ export interface Chapter {
   source_name?: string | null;
 }
 
+export interface ManuscriptRelease {
+  id: string;
+  project_id: string;
+  revision: number;
+  chapter_start: number;
+  chapter_end: number;
+  chapter_versions: Array<{
+    ordinal: number;
+    chapter_id: string;
+    version: number;
+    content_hash: string;
+  }>;
+  continuity_job_id: string;
+  continuity_revision: number;
+  rights_status: Project['rights_status'];
+  risk_ack: boolean;
+  decision_reason?: string | null;
+  previous_release_id?: string | null;
+  is_current: boolean;
+  created_at: string;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

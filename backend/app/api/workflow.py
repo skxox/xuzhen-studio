@@ -11,6 +11,7 @@ from ..domain.models import (
     CreativeBrief,
     GenerationJob,
     GenerationOutput,
+    ManuscriptRelease,
     StageState,
 )
 from ..services.continuity import (
@@ -142,7 +143,12 @@ def decide_stage(
             "chapter_end": end,
             "continuity_risk_ack": (continuity_stage.decision or {}).get("risk_ack", False),
             "chapter_versions": [
-                {"ordinal": item.ordinal, "chapter_id": item.id, "version": item.version}
+                {
+                    "ordinal": item.ordinal,
+                    "chapter_id": item.id,
+                    "version": item.version,
+                    "content_hash": item.content_hash,
+                }
                 for item in scoped_chapters
             ],
         }
@@ -243,8 +249,32 @@ def decide_stage(
             },
         )
     elif stage_key == "manuscriptRelease" and data.action == "accept" and release_decision:
+        previous_release = db.scalar(
+            select(ManuscriptRelease)
+            .where(ManuscriptRelease.project_id == project_id)
+            .order_by(ManuscriptRelease.revision.desc())
+            .limit(1)
+        )
+        release = ManuscriptRelease(
+            project_id=project_id,
+            revision=(previous_release.revision + 1) if previous_release else 1,
+            chapter_start=release_decision["chapter_start"],
+            chapter_end=release_decision["chapter_end"],
+            chapter_versions=release_decision["chapter_versions"],
+            continuity_job_id=release_decision["continuity_job_id"],
+            continuity_revision=release_decision["continuity_report_revision"],
+            rights_status=project.rights_status,
+            risk_ack=release_decision["continuity_risk_ack"],
+            decision_reason=(continuity_stage.decision or {}).get("reason"),
+            previous_release_id=previous_release.id if previous_release else None,
+        )
+        db.add(release)
+        db.flush()
+        release_decision["release_id"] = release.id
+        release_decision["revision"] = release.revision
+        release_decision["previous_release_id"] = release.previous_release_id
         stage.decision = release_decision
-        audit(db, project_id, "manuscript.release_locked", stage.id, release_decision)
+        audit(db, project_id, "manuscript.release_locked", release.id, release_decision)
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"

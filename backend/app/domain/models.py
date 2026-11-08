@@ -57,6 +57,31 @@ class Chapter(Timestamped, Base):
     )
 
 
+class ManuscriptRelease(Timestamped, Base):
+    __tablename__ = "manuscript_releases"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    chapter_start: Mapped[int] = mapped_column(Integer)
+    chapter_end: Mapped[int] = mapped_column(Integer)
+    chapter_versions: Mapped[list[dict]] = mapped_column(JSON)
+    continuity_job_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    continuity_revision: Mapped[int] = mapped_column(Integer)
+    rights_status: Mapped[str] = mapped_column(String(32))
+    risk_ack: Mapped[bool] = mapped_column(Boolean, default=False)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    previous_release_id: Mapped[str | None] = mapped_column(
+        ForeignKey("manuscript_releases.id", ondelete="RESTRICT"), nullable=True
+    )
+    __table_args__ = (
+        UniqueConstraint("project_id", "revision", name="uq_manuscript_release_revision"),
+    )
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

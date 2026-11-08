@@ -74,6 +74,11 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
     queryFn: () => api.chapters(projectId!),
     enabled: Boolean(projectId && project?.creation_mode === 'original'),
   });
+  const releasesQuery = useQuery({
+    queryKey: ['manuscript-releases', projectId],
+    queryFn: () => api.manuscriptReleases(projectId!),
+    enabled: Boolean(projectId && project?.creation_mode === 'original'),
+  });
   const profilesQuery = useQuery({
     queryKey: ['service-profiles', projectId],
     queryFn: () => api.serviceProfiles(projectId!),
@@ -157,6 +162,7 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
       queryClient.invalidateQueries({ queryKey: ['jobs', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['stages', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['chapters', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['manuscript-releases', projectId] }),
     ]);
   const generate = useMutation({
     mutationFn: async () => {
@@ -289,6 +295,8 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
       : '';
   const releaseSnapshot = releaseStage?.decision?.chapter_versions as
     Array<{ ordinal: number; chapter_id: string; version: number }> | undefined;
+  const releases = releasesQuery.data ?? [];
+  const currentRelease = releases.find((release) => release.is_current);
 
   if (project && project.creation_mode !== 'original') {
     return (
@@ -605,9 +613,10 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
           {releaseStage?.status === 'accepted' && releaseSnapshot ? (
             <div className="inline-note">
               <FileCheck2 size={16} />
-              已锁定第 {releaseStage.decision.chapter_start as number} 至第{' '}
-              {releaseStage.decision.chapter_end as number} 章，共 {releaseSnapshot.length}{' '}
-              个章节版本。锁定后仍可继续写新章节。
+              {currentRelease
+                ? `原创稿 v${currentRelease.revision}（${currentRelease.id.slice(0, 8)}）已锁定第 ${currentRelease.chapter_start} 至第 ${currentRelease.chapter_end} 章，共 ${currentRelease.chapter_versions.length} 个章节版本。`
+                : `已锁定第 ${releaseStage.decision.chapter_start as number} 至第 ${releaseStage.decision.chapter_end as number} 章，共 ${releaseSnapshot.length} 个章节版本。`}{' '}
+              锁定后仍可继续写新章节。
             </div>
           ) : (
             <div className="form-stack">
@@ -643,6 +652,52 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
               返回原文与创意页 <ArrowLeft size={14} />
             </Link>
           ) : null}
+        </Panel>
+      ) : null}
+      {releases.length ? (
+        <Panel>
+          <div className="panel-heading">
+            <div>
+              <h3>原创稿版本记录</h3>
+              <p>锁版记录只追加；章节或权利变更会使当前版本失效，但不会删除历史快照。</p>
+            </div>
+            <Badge>{releases.length} 个版本</Badge>
+          </div>
+          <div className="release-history-list">
+            {releases.map((release) => (
+              <article className="release-history-item" key={release.id}>
+                <div className="release-history-item__main">
+                  <strong>
+                    原创稿 v{release.revision} · 第 {release.chapter_start}–{release.chapter_end} 章
+                  </strong>
+                  <span>
+                    {release.chapter_versions.length} 个章节版本 · 权利状态：{release.rights_status}{' '}
+                    · {new Date(release.created_at).toLocaleString()}
+                  </span>
+                  <small>
+                    发布 ID：{release.id} · 连续性报告修订 v{release.continuity_revision}
+                    {release.previous_release_id
+                      ? ` · 前一版本：${release.previous_release_id}`
+                      : ''}
+                  </small>
+                </div>
+                <Badge tone={release.is_current ? 'green' : 'neutral'}>
+                  {release.is_current ? '当前有效' : '历史快照'}
+                </Badge>
+                <details className="release-history-item__details">
+                  <summary>查看章节版本清单</summary>
+                  <ul>
+                    {release.chapter_versions.map((chapter) => (
+                      <li key={chapter.chapter_id}>
+                        第 {chapter.ordinal} 章 · v{chapter.version} ·{' '}
+                        {chapter.content_hash.slice(0, 12)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </article>
+            ))}
+          </div>
         </Panel>
       ) : null}
       <div className="button-row">

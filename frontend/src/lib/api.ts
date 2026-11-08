@@ -10,6 +10,7 @@ import type {
   CreativeBrief,
   CreativeBriefSaveInput,
   GenerationJobSummary,
+  ManuscriptRelease,
   Project,
   ProjectCreateInput,
   ServiceProfile,
@@ -95,6 +96,8 @@ export const api = {
   commercialMaterialFileUrl: (projectId: string, materialId: string) =>
     `${API_ROOT}/projects/${projectId}/commercial-materials/${materialId}/file`,
   stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
+  manuscriptReleases: (projectId: string) =>
+    request<ManuscriptRelease[]>(`/projects/${projectId}/manuscript-releases`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   startStage: (projectId: string, stage: string) =>
     request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(

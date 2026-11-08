@@ -28,7 +28,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 ## 领域边界
 
 1. **Project & Source**：项目创作模式、版权/权利声明、原文版本、章节、内容哈希和可回跳段落位置。
-2. **Creative Production**：原创简报/故事圣经与改编大纲、角色/美术设定、剧本、场次、节拍、对白和分镜。每项候选保留来源引用与版本。
+2. **Creative Production**：原创简报/故事圣经与改编大纲、角色/美术设定、剧本、场次、节拍、对白和分镜。每项候选保留来源引用与版本；`ManuscriptRelease` 追加保存被作者锁定的章节范围、章节哈希、连续性审校版本与权利状态快照。
 3. **Workflow**：阶段状态机、依赖图、门禁决定、豁免理由、下游 stale 传播。
 4. **Generation**：Run/Batch、Job/Attempt、幂等键、不可变输入快照、Provider 快照、Candidate 和 ReviewDecision。
 5. **Assets & Delivery**：Asset/AssetVersion/Reference、时间线、字幕、导出及交付清单。
@@ -61,6 +61,7 @@ Workers：文本 / 图片 / 视频 / 音频 / FFmpeg 合成
 - `GET/POST /projects/{id}/character-references`（角色锚点、服装规则与固定四视图清单；仅保存草稿，不生成图片）
 - `POST/GET /projects/{id}/service-profiles`、`POST /projects/{id}/service-profiles/{profile_id}/test`（目前仅 OpenAI 兼容文本服务）
 - `POST/GET /projects/{id}/jobs`、`PUT /projects/{id}/jobs/{job_id}/output`、`GET /projects/{id}/jobs/{job_id}/output/versions`（原创故事圣经、长篇大纲、文学角色圣经和逐章正文支持真实文本生成；正文任务绑定章节序号；请求需数据处理授权并要求阶段处于 running；候选可人工修订并保留旧版本）
+- `GET /projects/{id}/manuscript-releases`、`GET /projects/{id}/manuscript-releases/{release_id}`（作者验收原创稿锁版时追加范围快照；记录章节版本/哈希、连续性报告修订、权利状态和前序发布；章节或权利变更后保留记录但不再标记为当前有效）
 - Swagger UI：`/docs`
 
 后端按 `api/`（HTTP 应用与路由）、`core/`（配置）、`domain/`（实体）、`infrastructure/`（数据库）和 `services/`（用例）分层。OpenAI 兼容文本调用位于 `services/openai_compatible.py`；其他未注册 Adapter fail closed。Provider 调用转为长任务后应迁入独立 `workers/`。
@@ -80,7 +81,7 @@ uv run uvicorn app.main:app --reload
 
 ### M0：领域 API 基础（当前）
 
-项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、带章节版本快照的原创稿锁版、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经/长篇大纲/文学角色圣经文本候选、任务快照、输出持久化和审计事件。范围报告最多覆盖 20 个连续章节；全书长期记忆、finding 单项修订跟踪和独立 ManuscriptRelease 实体仍需后续实现。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
+项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、独立且追加写入的 ManuscriptRelease 版本、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经/长篇大纲/文学角色圣经文本候选、任务快照、输出持久化和审计事件。范围报告最多覆盖 20 个连续章节；全书长期记忆与 finding 单项修订跟踪仍需后续实现。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
 
 ### M1：创作纵切片
 

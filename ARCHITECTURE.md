@@ -97,8 +97,8 @@ uv run uvicorn app.main:app --reload
 
 ### M4：成片交付
 
-音频与字幕 Adapter、FFmpeg 时间线合成、局部返工影响预览、质量检查、MP4/SRT/manifest 导出和全链路可追溯。
+已接入剪辑交接包首版：所有逐镜视频验收后，按锁定分镜顺序打包 MP4，按剧本对白生成 SRT，并附带版本/素材哈希 manifest；交接包需要人工验收后才解锁交付。SRT 时间码以视频请求时长估算，包内明确标注尚未校准实际时长。仍需音频/配音 Adapter、FFmpeg 最终时间线合成、实际时长探测与字幕校准、局部返工影响预览、质量检查和最终母版导出。
 
 ## 当前不具备的生产条件
 
-当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、语音 Provider、媒体安全扫描和端到端成片合成。视频仅接入特定 OpenAI-compatible 异步 API 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。当前可以生成并审核逐镜视频候选，但不能宣称已生成完整可交付成片。每完成一项应更新规格差异表与 API schema。
+当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、语音 Provider、媒体安全扫描和端到端成片合成。视频仅接入特定 OpenAI-compatible 异步 API 子集；已支持的协议不代表任意厂商可直接使用。图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应，视频只接受 MP4。系统可生成逐镜视频和剪辑交接包，但不能宣称已生成配音、混音或最终可交付母版。每完成一项应更新规格差异表与 API schema。

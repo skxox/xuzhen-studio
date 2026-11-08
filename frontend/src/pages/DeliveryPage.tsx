@@ -1,221 +1,350 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowDownToLine, Check, Clapperboard, Film, Subtitles } from 'lucide-react';
 import { useState } from 'react';
-import {
-  ArrowDownToLine,
-  AudioLines,
-  Check,
-  CheckCheck,
-  ChevronRight,
-  FileVideo,
-  MessageSquareText,
-  Play,
-  ShieldCheck,
-  Subtitles,
-} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Panel, PageHeading } from '../components/ui/Panel';
+import { PageHeading, Panel } from '../components/ui/Panel';
+import { api } from '../lib/api';
+import type { Project } from '../lib/types';
 
-export function DeliveryPage() {
-  const [toast, setToast] = useState('');
+export function DeliveryPage({ project }: { project?: Project }) {
+  const projectId = project?.id;
+  const [reason, setReason] = useState('');
+  const [subtitleDraft, setSubtitleDraft] = useState<{
+    packageId: string;
+    value: string;
+  } | null>(null);
+  const client = useQueryClient();
+  const stagesQuery = useQuery({
+    queryKey: ['stages', projectId],
+    queryFn: () => api.stages(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const packagesQuery = useQuery({
+    queryKey: ['edit-packages', projectId],
+    queryFn: () => api.editPackages(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const packageDetailQuery = useQuery({
+    queryKey: ['edit-package', projectId, packagesQuery.data?.[0]?.id],
+    queryFn: () => api.editPackage(projectId!, packagesQuery.data![0].id),
+    enabled: Boolean(projectId && packagesQuery.data?.[0]?.id),
+  });
+  const plansQuery = useQuery({
+    queryKey: ['shot-plan-releases', projectId],
+    queryFn: () => api.shotPlanReleases(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const videosQuery = useQuery({
+    queryKey: ['video-candidates', projectId],
+    queryFn: () => api.videoCandidates(projectId!),
+    enabled: Boolean(projectId),
+  });
+  const stages = stagesQuery.data ?? [];
+  const stage = stages.find((item) => item.stage_key === 'post');
+  const deliveryStage = stages.find((item) => item.stage_key === 'delivery');
+  const plan = plansQuery.data?.find((item) => item.is_current);
+  const latestPackage = packagesQuery.data?.[0];
+  const packageDetail = packageDetailQuery.data;
+  const currentSubtitleDraft =
+    subtitleDraft && subtitleDraft.packageId === latestPackage?.id ? subtitleDraft.value : null;
+  const hasSubtitleChanges =
+    currentSubtitleDraft !== null && currentSubtitleDraft !== packageDetail?.subtitle_srt;
+  const candidates = (videosQuery.data ?? []).filter(
+    (item) => item.shot_plan_release_id === plan?.id && item.status === 'accepted',
+  );
+  const expectedShots = plan?.shot_count ?? 0;
+  const complete = Boolean(
+    plan &&
+    stages.find((item) => item.stage_key === 'video')?.status === 'accepted' &&
+    candidates.length === expectedShots,
+  );
+  const refresh = async () =>
+    Promise.all(
+      ['stages', 'edit-packages'].map((key) =>
+        client.invalidateQueries({ queryKey: [key, projectId] }),
+      ),
+    );
+  const create = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !complete) throw new Error('全部逐镜视频验收后才能创建剪辑包。');
+      if (stage?.status === 'needs_review') throw new Error('请先验收或退回当前剪辑包。');
+      if (stage?.status !== 'running') await api.startStage(projectId, 'post');
+      return api.createEditPackage(projectId);
+    },
+    onSuccess: refresh,
+    onError: refresh,
+  });
+  const decide = useMutation({
+    mutationFn: (action: 'accept' | 'reject') =>
+      api.decideStage(projectId!, 'post', action, action === 'reject' ? reason.trim() : undefined),
+    onSuccess: async () => {
+      setReason('');
+      await refresh();
+    },
+  });
+  const saveSubtitles = useMutation({
+    mutationFn: () => {
+      if (!projectId || !latestPackage || currentSubtitleDraft === null)
+        throw new Error('字幕没有待保存的修订。');
+      return api.updateEditPackageSubtitles(projectId, latestPackage.id, currentSubtitleDraft);
+    },
+    onSuccess: async () => {
+      setSubtitleDraft(null);
+      await refresh();
+    },
+  });
+  const error =
+    create.error ??
+    decide.error ??
+    saveSubtitles.error ??
+    stagesQuery.error ??
+    packagesQuery.error ??
+    packageDetailQuery.error;
+  const subtitlePreview = packageDetail?.source_snapshot.subtitle_preview ?? [];
   return (
     <div className="delivery-page">
       <PageHeading
-        eyebrow="REVIEW & DELIVERY"
-        title="审片决定，要能回到具体镜头。"
-        description="成片版本、批注、字幕、来源清单和导出参数都留在同一条交付记录里。"
+        eyebrow="POST-PRODUCTION · HANDOFF"
+        title="生成可继续编辑的剪辑交接包。"
+        description="汇总已验收逐镜视频，按锁定剧本生成 SRT，并附带镜头顺序与版本来源清单。此包不是已配音、已混音或渲染完成的最终母版。"
         actions={
-          <Badge tone="gold" dot>
-            第 3 集 · 预交付检查中
+          <Badge tone={stage?.status === 'accepted' ? 'green' : 'gold'} dot>
+            后期阶段 · {stage?.status ?? '等待上游'}
           </Badge>
         }
       />
-      <div className="delivery-grid">
-        <Panel className="delivery-master">
-          <div className="delivery-monitor">
-            <div className="monitor-room">
-              <div className="monitor-room__light" />
-              <div className="monitor-room__figure" />
-            </div>
-            <div className="monitor-shade">
-              <span>EP03 · CUT 08</span>
-              <button aria-label="播放预览">
-                <Play size={18} fill="currentColor" />
-              </button>
-              <small>00:00:34 / 00:01:46</small>
-            </div>
-          </div>
-          <div className="delivery-master__head">
-            <div>
-              <Badge tone="blue">预览合成 · v02</Badge>
-              <h2>空白的十一分钟</h2>
-              <p>8 个镜头 · 临时合成 · 尚未通过阶段门禁</p>
-            </div>
-            <Button>
-              选择版本 <ChevronRight size={14} />
-            </Button>
-          </div>
-          <div className="delivery-timeline">
-            <div className="timeline-ruler">
-              <span>00:00</span>
-              <span>00:30</span>
-              <span>01:00</span>
-              <span>01:30</span>
-              <span>01:46</span>
-            </div>
-            <div className="timeline-track track-video">
-              {Array.from({ length: 8 }, (_, i) => (
-                <i
-                  key={i}
-                  className={i === 4 ? 'has-note' : ''}
-                  style={{ flex: i % 3 === 0 ? 1.4 : 1 }}
-                >
-                  <span>SH {String(i + 1).padStart(2, '0')}</span>
-                </i>
-              ))}
-            </div>
-            <div className="timeline-track track-audio">
-              <AudioLines size={13} />
-              <i />
-            </div>
-            <div className="timeline-track track-captions">
-              <Subtitles size={13} />
-              <i />
-            </div>
-          </div>
-          <div className="delivery-master__actions">
-            <button
-              className="quiet-action"
-              onClick={() => setToast('批注已定位到当前预览时间码 00:34。')}
-            >
-              <MessageSquareText size={14} />
-              添加时间码批注
-            </button>
-            <span />
-            <Button variant="primary" onClick={() => setToast('审片通过前仍有 2 项检查未满足。')}>
-              提交审片决定 <ChevronRight size={14} />
-            </Button>
-          </div>
+      {!projectId && (
+        <Panel>
+          <p>请先选择项目。</p>
         </Panel>
-        <aside className="delivery-side">
-          <Panel className="delivery-quality">
-            <div className="panel-heading">
+      )}
+      {projectId && (
+        <div className="delivery-grid">
+          <Panel className="delivery-master">
+            <div className="delivery-master__head">
               <div>
-                <div className="eyebrow">DELIVERY CHECKS</div>
-                <h3>交付前检查</h3>
+                <Badge tone={complete ? 'green' : 'gold'}>
+                  {complete ? '逐镜素材齐备' : '等待逐镜视频验收'}
+                </Badge>
+                <h2>{project.name}</h2>
+                <p>
+                  已验收视频 {candidates.length} / {expectedShots} · 当前分镜版本{' '}
+                  {plan?.revision ?? '—'}
+                </p>
               </div>
-              <Badge tone="gold">4 / 6</Badge>
+              <Film size={24} />
             </div>
-            <DeliveryCheck title="镜头视频候选完整" detail="8 / 8 已接受" done />
-            <DeliveryCheck title="对白与字幕覆盖" detail="12 行 · 1 处待校对" warn />
-            <DeliveryCheck title="音画同步与响度" detail="检测已通过" done />
-            <DeliveryCheck title="画面轴线连续性" detail="Shot 04 · 需复核" warn />
-            <DeliveryCheck title="素材权利与出处清单" detail="1 项音乐素材未确认" warn />
-            <DeliveryCheck title="母版编码与文件校验" detail="导出后运行" />
-            <div className="quality-footer">
-              <ShieldCheck size={15} />
-              <span>失败项须修复或由有权限者记录可追溯的风险豁免。</span>
+            {!complete && (
+              <p>
+                需要当前分镜下的每个镜头都有一个已验收视频候选。
+                <Link to="/writing/video">前往逐镜视频审片</Link>
+              </p>
+            )}
+            {stage?.status === 'running' && !create.isPending && (
+              <p>
+                当前阶段没有可审阅的交接包。点击重新打包会重新检查素材并创建新的修订；当前打包由 API
+                请求同步执行。
+              </p>
+            )}
+            {complete && (
+              <details className="delivery-clips">
+                <summary>预览本次剪辑包收录的 {candidates.length} 条镜头视频</summary>
+                <div className="delivery-clips__grid">
+                  {candidates.map((item) => (
+                    <article key={item.id}>
+                      <video controls preload="none" src={api.videoFileUrl(projectId, item.id)} />
+                      <span>
+                        EP{item.episode_number} · SC{item.scene_number} · SH{item.shot_number}
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </details>
+            )}
+            {error && <p className="form-error">{error.message}</p>}
+            {stage?.status === 'needs_review' && latestPackage?.status === 'needs_review' && (
+              <div className="package-review">
+                <h3>剪辑包 v{latestPackage.revision} 等待审核</h3>
+                <p>
+                  压缩包包含 {latestPackage.shot_count} 条视频、{latestPackage.subtitle_count}{' '}
+                  条字幕。请下载并检查字幕时间码与镜头顺序。
+                </p>
+                <a className="text-link" href={api.editPackageFileUrl(projectId, latestPackage.id)}>
+                  <ArrowDownToLine size={15} /> 下载并检查剪辑包
+                </a>
+                <details className="subtitle-editor">
+                  <summary>在工作台编辑 SRT 字幕（保存会创建新版本）</summary>
+                  <textarea
+                    rows={16}
+                    value={currentSubtitleDraft ?? packageDetail?.subtitle_srt ?? ''}
+                    onChange={(event) =>
+                      latestPackage &&
+                      setSubtitleDraft({ packageId: latestPackage.id, value: event.target.value })
+                    }
+                    aria-label="编辑剪辑包 SRT 字幕"
+                    placeholder="正在载入字幕…"
+                    disabled={packageDetailQuery.isLoading}
+                  />
+                  <div className="workspace-actions">
+                    <Button
+                      onClick={() => setSubtitleDraft(null)}
+                      disabled={!hasSubtitleChanges || saveSubtitles.isPending}
+                    >
+                      放弃未保存修改
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => saveSubtitles.mutate()}
+                      disabled={
+                        !hasSubtitleChanges ||
+                        saveSubtitles.isPending ||
+                        packageDetailQuery.isLoading
+                      }
+                    >
+                      {saveSubtitles.isPending ? '正在生成新修订…' : '保存字幕并生成新版本'}
+                    </Button>
+                  </div>
+                </details>
+                <label>
+                  退回原因
+                  <input
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    placeholder="例如：镜头顺序或字幕内容需要调整"
+                  />
+                </label>
+                <div className="workspace-actions">
+                  <Button
+                    onClick={() => decide.mutate('reject')}
+                    disabled={!reason.trim() || decide.isPending}
+                  >
+                    退回重做
+                  </Button>
+                  <Button
+                    variant="primary"
+                    icon={<Check size={15} />}
+                    onClick={() => decide.mutate('accept')}
+                    disabled={decide.isPending}
+                  >
+                    验收后期交接包
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="delivery-master__actions">
+              <Button
+                variant="primary"
+                icon={<Clapperboard size={15} />}
+                disabled={!complete || create.isPending || stage?.status === 'needs_review'}
+                onClick={() => create.mutate()}
+              >
+                {create.isPending
+                  ? '正在打包镜头素材…'
+                  : stage?.status === 'running'
+                    ? '恢复并重新打包'
+                    : '生成剪辑交接包'}
+              </Button>
+              {stage?.status === 'accepted' && latestPackage && (
+                <a className="text-link" href={api.editPackageFileUrl(projectId, latestPackage.id)}>
+                  <ArrowDownToLine size={15} /> 下载已验收版本
+                </a>
+              )}
             </div>
           </Panel>
-          <Panel className="delivery-exports">
-            <div className="panel-heading">
-              <div>
-                <div className="eyebrow">EXPORT PROFILE</div>
-                <h3>导出配置</h3>
+          <aside className="delivery-side">
+            <Panel className="delivery-quality">
+              <div className="panel-heading">
+                <div>
+                  <div className="eyebrow">EDIT PACKAGE</div>
+                  <h3>包内文件</h3>
+                </div>
+                <Subtitles size={18} />
               </div>
-              <button className="text-link">编辑</button>
-            </div>
-            <div className="export-profile">
-              <b>竖屏短剧 · 审片预览</b>
-              <span>H.264 · 1080 × 1920 · 25 fps</span>
-              <span>简体中文字幕 · 无水印</span>
-            </div>
-            <div className="export-files">
-              <div>
-                <FileVideo size={15} />
-                <span>
-                  MP4 母版<small>视频与混音轨</small>
-                </span>
-                <Badge>待生成</Badge>
+              <div className="export-files">
+                <div>
+                  <Film size={15} />
+                  <span>
+                    逐镜 MP4<small>按锁定分镜顺序组织</small>
+                  </span>
+                  <Badge tone={complete ? 'green' : 'gold'}>
+                    {candidates.length}/{expectedShots}
+                  </Badge>
+                </div>
+                <div>
+                  <Subtitles size={15} />
+                  <span>
+                    中文字幕<small>SRT · 按请求时长估算</small>
+                  </span>
+                  <Badge>{latestPackage ? `${latestPackage.subtitle_count} 行` : '待生成'}</Badge>
+                </div>
+                <div>
+                  <Clapperboard size={15} />
+                  <span>
+                    来源清单<small>manifest.json · 含上游版本 ID</small>
+                  </span>
+                  <Badge>
+                    {latestPackage ? `SHA ${latestPackage.sha256.slice(0, 8)}` : '待生成'}
+                  </Badge>
+                </div>
               </div>
-              <div>
-                <Subtitles size={15} />
-                <span>
-                  字幕文件<small>SRT · VTT</small>
-                </span>
-                <Badge tone="green">已就绪</Badge>
+              <p className="quality-footer">
+                SRT
+                时间码以视频请求时长估算，正式成片前需按素材实际时长校准。剪辑包不包含配音和最终合成。
+              </p>
+              {latestPackage && (
+                <p>
+                  最近版本 v{latestPackage.revision} ·{' '}
+                  {(latestPackage.size_bytes / 1_000_000).toFixed(1)} MB ·{' '}
+                  {new Date(latestPackage.created_at).toLocaleString()}
+                </p>
+              )}
+            </Panel>
+            <Panel className="delivery-quality">
+              <div className="panel-heading">
+                <div>
+                  <div className="eyebrow">SUBTITLE PREVIEW</div>
+                  <h3>字幕抽样</h3>
+                </div>
               </div>
-              <div>
-                <CheckCheck size={15} />
-                <span>
-                  来源清单<small>manifest.json</small>
-                </span>
-                <Badge tone="gold">1 项待确认</Badge>
-              </div>
-            </div>
-            <Button
-              variant="primary"
-              icon={<ArrowDownToLine size={15} />}
-              onClick={() => setToast('导出任务未创建：请先处理待复核门禁。')}
-            >
-              生成交付包
-            </Button>
-          </Panel>
-        </aside>
-      </div>
-      <div className="delivery-history">
-        <div className="eyebrow">REVISION HISTORY</div>
-        <h3>交付修订链</h3>
-        <div className="revision-row">
-          <span className="revision-dot is-current" />
-          <div>
-            <b>Cut v02 · 当前预览</b>
-            <small>今天 14:32 · 更新 Shot 06 和字幕 · 未通过最终审片</small>
-          </div>
-          <Badge tone="gold">进行中</Badge>
-          <button className="text-link">查看差异</button>
+              {subtitlePreview.length ? (
+                <ol className="subtitle-preview">
+                  {subtitlePreview.slice(0, 10).map((cue, index) => (
+                    <li key={`${cue.start_ms}-${index}`}>
+                      <time>{formatTime(cue.start_ms)}</time>
+                      <span>{cue.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p>剪辑包生成后显示锁定剧本对应的字幕抽样。</p>
+              )}
+            </Panel>
+          </aside>
         </div>
-        <div className="revision-row">
-          <span className="revision-dot" />
-          <div>
-            <b>Cut v01 · 内部试片</b>
-            <small>昨天 18:10 · 1 条审片意见 · 已归档</small>
-          </div>
-          <Badge>历史版本</Badge>
-          <button className="text-link">恢复分支</button>
-        </div>
-      </div>
-      {toast && (
-        <div className="toast" role="status">
-          <span className="toast-mark">
-            <Check size={13} />
-          </span>
-          {toast}
-          <button onClick={() => setToast('')} aria-label="关闭">
-            ×
-          </button>
-        </div>
+      )}
+      {deliveryStage?.status === 'ready' && (
+        <Panel>
+          <p className="success-copy">后期交接包已验收，交付检查阶段已解锁。</p>
+        </Panel>
+      )}
+      {latestPackage && (packagesQuery.data?.length ?? 0) > 1 && (
+        <Panel>
+          <h3>历史剪辑包</h3>
+          {packagesQuery.data?.slice(1).map((item) => (
+            <p key={item.id}>
+              v{item.revision} · {item.status} · {item.shot_count} 镜头 ·{' '}
+              <a href={api.editPackageFileUrl(projectId!, item.id)}>下载</a>
+            </p>
+          ))}
+        </Panel>
       )}
     </div>
   );
 }
 
-function DeliveryCheck({
-  title,
-  detail,
-  done,
-  warn,
-}: {
-  title: string;
-  detail: string;
-  done?: boolean;
-  warn?: boolean;
-}) {
-  return (
-    <div className={`delivery-check ${done ? 'is-done' : ''} ${warn ? 'is-warn' : ''}`}>
-      <span>{done ? <Check size={13} /> : warn ? '!' : '·'}</span>
-      <b>{title}</b>
-      <small>{detail}</small>
-      <button aria-label={`查看${title}`}>›</button>
-    </div>
-  );
+function formatTime(milliseconds: number) {
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }

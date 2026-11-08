@@ -265,6 +265,34 @@ class VideoCandidate(Timestamped, Base):
     status: Mapped[str] = mapped_column(String(24), default="processing")
 
 
+class EditPackage(Timestamped, Base):
+    __tablename__ = "edit_packages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    shot_plan_release_id: Mapped[str] = mapped_column(
+        ForeignKey("shot_plan_releases.id", ondelete="RESTRICT"), index=True
+    )
+    script_release_id: Mapped[str] = mapped_column(
+        ForeignKey("script_releases.id", ondelete="RESTRICT"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+    content_type: Mapped[str] = mapped_column(String(120), default="application/zip")
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    shot_count: Mapped[int] = mapped_column(Integer)
+    subtitle_count: Mapped[int] = mapped_column(Integer)
+    subtitle_srt: Mapped[str] = mapped_column(Text, default="")
+    source_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="needs_review")
+    __table_args__ = (UniqueConstraint("project_id", "revision", name="uq_edit_package_revision"),)
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

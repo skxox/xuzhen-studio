@@ -11,6 +11,7 @@ import type {
   CommercialMaterial,
   CreativeBrief,
   CreativeBriefSaveInput,
+  EditPackage,
   GenerationJobSummary,
   KeyframeCandidate,
   VideoCandidate,
@@ -120,6 +121,19 @@ export const api = {
     request<VideoCandidate[]>(`/projects/${projectId}/video-candidates`),
   videoFileUrl: (projectId: string, candidateId: string) =>
     `${API_ROOT}/projects/${projectId}/video-candidates/${candidateId}/file`,
+  editPackages: (projectId: string) =>
+    request<EditPackage[]>(`/projects/${projectId}/edit-packages`),
+  editPackage: (projectId: string, packageId: string) =>
+    request<EditPackage>(`/projects/${projectId}/edit-packages/${packageId}`),
+  createEditPackage: (projectId: string) =>
+    request<EditPackage>(`/projects/${projectId}/edit-packages`, { method: 'POST' }),
+  updateEditPackageSubtitles: (projectId: string, packageId: string, srt: string) =>
+    request<EditPackage>(`/projects/${projectId}/edit-packages/${packageId}/subtitles`, {
+      method: 'PUT',
+      body: JSON.stringify({ srt }),
+    }),
+  editPackageFileUrl: (projectId: string, packageId: string) =>
+    `${API_ROOT}/projects/${projectId}/edit-packages/${packageId}/file`,
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   job: (projectId: string, jobId: string) =>
     request<GenerationJobSummary>(`/projects/${projectId}/jobs/${jobId}`),

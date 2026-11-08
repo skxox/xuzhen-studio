@@ -14,6 +14,7 @@
 @import './workspace/continuity.css';
 @import './workspace/canvas.css';
 @import './workspace/delivery.css';
+@import './workspace/edit-package.css';
 @import './workspace/settings.css';
 @import './workspace/responsive.css';
 @import './workspace/theme-overrides.css';

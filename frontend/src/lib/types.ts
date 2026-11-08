@@ -232,6 +232,27 @@ export interface VideoCandidate {
   file_url?: string | null;
 }
 
+export interface EditPackage {
+  id: string;
+  revision: number;
+  shot_count: number;
+  subtitle_count: number;
+  subtitle_srt?: string;
+  size_bytes: number;
+  sha256: string;
+  source_snapshot: {
+    shot_plan_release_id: string;
+    shot_plan_revision: number;
+    script_release_id: string;
+    script_revision: number;
+    video_candidate_ids: string[];
+    subtitle_preview: Array<{ start_ms: number; end_ms: number; text: string }>;
+  };
+  status: 'needs_review' | 'accepted' | 'rejected';
+  created_at: string;
+  file_url: string;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

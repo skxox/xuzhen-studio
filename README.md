@@ -7,7 +7,7 @@ AI 主导、人工审阅的小说到视频制作工作台产品原型与研发�
 - `outputs/index.html`：可交互原型，包含“已有小说改编”和“从创意原创”两种入口；覆盖原文/创意输入、AI 阶段候选审阅、角色与美术设定、分集剧本、分镜、关键帧、视频、声音/字幕/合成、审片交付和交付后修订。
 - `outputs/PRODUCT_SPEC.md`：双入口工作流、各阶段门禁、交接/汇合契约、Provider API、任务状态、质量规则、按钮行为约定与端到端研发验收规格。
 - `ARCHITECTURE.md`：MVP 技术架构、领域边界、安全策略和研发里程碑。
-- `backend/`：FastAPI 后端代码，包含项目与阶段状态、服务档案、OpenAI 兼容文本/图片/异步视频生成、候选持久化和审计 API。原创入口支持逐章正文、范围连续性审校、剧本/分镜锁版、关键帧及逐镜视频候选审阅。
+- `backend/`：FastAPI 后端代码，包含项目与阶段状态、服务档案、OpenAI 兼容文本/图片/异步视频生成、候选持久化和审计 API。原创入口支持逐章正文、范围连续性审校、剧本/分镜锁版、关键帧及逐镜视频候选审阅，并可生成带 SRT 和来源清单的剪辑交接包。
 - `frontend/`：React + TypeScript 工作台，含深浅主题、制片总览、小说/创意、剧本、分镜、流程画布、素材、交付和 Provider 设置页面。
 
 ## 预览
@@ -34,7 +34,7 @@ cp .env.example .env
 uv run uvicorn app.main:app --reload
 ```
 
-API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧，视频下载后按镜头审片，所有镜头验收后才解锁后期。视频服务商必须实际实现该异步协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持视频生成。当前由前端轮询驱动任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
+API 文档地址：`http://127.0.0.1:8000/docs`。开发数据库使用 SQLite。文本、图片 API 可生成并审阅候选；逐镜视频使用 OpenAI-compatible `/v1/videos` submit/poll/content 协议，引用已验收关键帧，视频下载后按镜头审片，所有镜头验收后才解锁后期。后期阶段可下载逐镜素材、对白 SRT 和版本来源 manifest 组成的剪辑交接包；该包不包含配音、混音或最终母版，SRT 时间码按视频请求时长估算。视频服务商必须实际实现该异步协议子集；连接检查只验证 `/models` 中的模型 ID，不代表厂商已验证支持视频生成。当前由前端轮询驱动任务刷新，还没有常驻后台 Worker/webhook。详见 `ARCHITECTURE.md`。
 
 ## 代码质量
 

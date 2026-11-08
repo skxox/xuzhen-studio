@@ -503,7 +503,7 @@ function AppShell() {
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />
               <Route path="/assets" element={<AssetsPage project={project} />} />
-              <Route path="/delivery" element={<DeliveryPage />} />
+              <Route path="/delivery" element={<DeliveryPage project={project} />} />
               <Route path="/settings" element={<SettingsPage project={project} />} />
               <Route
                 path="*"

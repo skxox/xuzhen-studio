@@ -11,6 +11,7 @@ from ..domain.models import (
     CommercialBrief,
     CommercialMaterial,
     CreativeBrief,
+    EditPackage,
     EpisodeAdaptationOutline,
     EpisodeSourceMapping,
     GenerationJob,
@@ -81,10 +82,10 @@ def decide_stage(
     if stage_key == "commercialBrief" and data.action == "waive":
         raise HTTPException(422, "commercial_brief_cannot_be_waived")
     if (
-        stage_key in {"source", "outline", "shotDesign", "keyframes", "video"}
+        stage_key in {"source", "outline", "shotDesign", "keyframes", "video", "post"}
         and data.action == "waive"
     ):
-        raise HTTPException(422, "source_and_adaptation_outline_cannot_be_waived")
+        raise HTTPException(422, "media_production_gates_cannot_be_waived")
     if stage_key in {"continuity", "manuscriptRelease"} and data.action == "waive":
         raise HTTPException(422, "novel_quality_gates_cannot_be_waived")
     if data.action in {"waive", "reject"} and not data.reason:
@@ -352,6 +353,27 @@ def decide_stage(
         )
         if video_candidate.shot_plan_release_id != release.id or not accepted_keyframe:
             raise HTTPException(409, "video_candidate_upstream_keyframe_is_stale")
+    edit_package = None
+    if stage_key == "post" and project.creation_mode == "original":
+        package_id = (stage.decision or {}).get("edit_package_id")
+        edit_package = db.scalar(
+            select(EditPackage).where(
+                EditPackage.id == package_id,
+                EditPackage.project_id == project_id,
+                EditPackage.status == "needs_review",
+            )
+        )
+        if not edit_package:
+            raise HTTPException(409, "edit_package_candidate_missing")
+        try:
+            release = current_shot_plan_release(db, project)
+        except KeyframePlanError as error:
+            raise HTTPException(409, str(error)) from None
+        if (
+            edit_package.shot_plan_release_id != release.id
+            or edit_package.script_release_id != release.script_release_id
+        ):
+            raise HTTPException(409, "edit_package_source_releases_are_stale")
     if (
         stage_key in {"characters", "art"}
         and data.action == "accept"
@@ -857,6 +879,24 @@ def decide_stage(
             "required_shot_count": len(required),
         }
         audit(db, project_id, f"video.{video_candidate.status}", video_candidate.id, stage.decision)
+    elif stage_key == "post" and edit_package:
+        edit_package.status = "accepted" if data.action == "accept" else "rejected"
+        stage.decision = {
+            "action": data.action,
+            "edit_package_id": edit_package.id,
+            "revision": edit_package.revision,
+            "reason": data.reason,
+            "shot_count": edit_package.shot_count,
+            "subtitle_count": edit_package.subtitle_count,
+            "sha256": edit_package.sha256,
+        }
+        audit(
+            db,
+            project_id,
+            f"post.edit_package_{edit_package.status}",
+            edit_package.id,
+            stage.decision,
+        )
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"

@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.config import settings
 from ..domain.models import (
     AdaptationBranch,
     AdaptationOutlineRelease,
@@ -12,8 +11,6 @@ from ..domain.models import (
     Chapter,
     CommercialBrief,
     CreativeBrief,
-    DeliveryMaster,
-    EditPackage,
     EpisodeAdaptationOutline,
     EpisodeSourceMapping,
     GenerationJob,
@@ -46,6 +43,7 @@ from ..services.keyframe_plan import (
     current_shot_plan_release,
     required_shots,
 )
+from ..services.media_decisions import MediaDecisionError, validate_media_decision
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from .common import (
     ALLOWED,
@@ -126,132 +124,16 @@ def decide_stage(
     outline_decision = adaptation_decisions.outline
     script_decision = adaptation_decisions.script
     shot_plan_decision = adaptation_decisions.shot_plan
-    keyframe_candidate = None
-    if stage_key == "keyframes" and project.creation_mode == "original":
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        keyframe_candidate = db.scalar(
-            select(KeyframeCandidate).where(
-                KeyframeCandidate.project_id == project_id,
-                KeyframeCandidate.job_id == candidate_job_id,
-                KeyframeCandidate.status == "needs_review",
-            )
-        )
-        if not keyframe_candidate:
-            raise HTTPException(409, "keyframe_candidate_missing")
-        try:
-            release = current_shot_plan_release(db, project)
-        except KeyframePlanError as error:
-            raise HTTPException(409, str(error)) from None
-        if keyframe_candidate.shot_plan_release_id != release.id:
-            raise HTTPException(409, "keyframe_candidate_shot_plan_stale")
-    video_candidate = None
-    if stage_key == "video" and project.creation_mode == "original":
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        video_candidate = db.scalar(
-            select(VideoCandidate).where(
-                VideoCandidate.project_id == project_id,
-                VideoCandidate.job_id == candidate_job_id,
-                VideoCandidate.status == "needs_review",
-            )
-        )
-        if not video_candidate:
-            raise HTTPException(409, "video_candidate_missing_or_not_ready")
-        try:
-            release = current_shot_plan_release(db, project)
-        except KeyframePlanError as error:
-            raise HTTPException(409, str(error)) from None
-        accepted_keyframe = db.scalar(
-            select(KeyframeCandidate.id).where(
-                KeyframeCandidate.id == video_candidate.keyframe_candidate_id,
-                KeyframeCandidate.status == "accepted",
-                KeyframeCandidate.shot_plan_release_id == release.id,
-            )
-        )
-        if video_candidate.shot_plan_release_id != release.id or not accepted_keyframe:
-            raise HTTPException(409, "video_candidate_upstream_keyframe_is_stale")
-    audio_candidate = None
-    voice_script = None
-    if stage_key == "voice" and project.creation_mode == "original":
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        audio_candidate = db.scalar(
-            select(AudioCandidate).where(
-                AudioCandidate.project_id == project_id,
-                AudioCandidate.job_id == candidate_job_id,
-                AudioCandidate.status == "needs_review",
-            )
-        )
-        if not audio_candidate:
-            raise HTTPException(409, "audio_candidate_missing_or_not_ready")
-        script_stage = db.scalar(
-            select(StageState).where(
-                StageState.project_id == project_id, StageState.stage_key == "script"
-            )
-        )
-        current_script_id = (
-            (script_stage.decision or {}).get("script_release_id")
-            if script_stage and script_stage.status == "accepted"
-            else None
-        )
-        voice_script = db.get(ScriptRelease, current_script_id) if current_script_id else None
-        if not voice_script or audio_candidate.script_release_id != voice_script.id:
-            raise HTTPException(409, "audio_candidate_script_snapshot_stale")
-    edit_package = None
-    delivery_master = None
-    if stage_key == "post" and project.creation_mode == "original":
-        package_id = (stage.decision or {}).get("edit_package_id")
-        edit_package = db.scalar(
-            select(EditPackage).where(
-                EditPackage.id == package_id,
-                EditPackage.project_id == project_id,
-                EditPackage.status == "needs_review",
-            )
-        )
-        if not edit_package:
-            raise HTTPException(409, "edit_package_candidate_missing")
-        try:
-            release = current_shot_plan_release(db, project)
-        except KeyframePlanError as error:
-            raise HTTPException(409, str(error)) from None
-        if (
-            edit_package.shot_plan_release_id != release.id
-            or edit_package.script_release_id != release.script_release_id
-        ):
-            raise HTTPException(409, "edit_package_source_releases_are_stale")
-    if stage_key == "delivery" and project.creation_mode == "original":
-        master_id = (stage.decision or {}).get("delivery_master_id")
-        delivery_master = db.scalar(
-            select(DeliveryMaster).where(
-                DeliveryMaster.id == master_id,
-                DeliveryMaster.project_id == project_id,
-                DeliveryMaster.status == "needs_review",
-            )
-        )
-        if not delivery_master:
-            raise HTTPException(409, "delivery_master_candidate_missing")
-        quality_report = (delivery_master.source_snapshot or {}).get("quality_report")
-        if not isinstance(quality_report, dict) or quality_report.get("passed") is not True:
-            raise HTTPException(409, "delivery_master_quality_check_required")
-        dialogue_fit = quality_report.get("dialogue_audio_fit")
-        if not isinstance(dialogue_fit, dict) or dialogue_fit.get("passed") is not True:
-            raise HTTPException(409, "delivery_master_dialogue_fit_check_required")
-        video_fit = quality_report.get("video_timing_fit")
-        if not isinstance(video_fit, dict) or video_fit.get("passed") is not True:
-            raise HTTPException(409, "delivery_master_video_timing_check_required")
-        master_path = (settings.storage_dir / delivery_master.storage_key).resolve()
-        if settings.storage_dir.resolve() not in master_path.parents or not master_path.is_file():
-            raise HTTPException(409, "delivery_master_file_missing")
-        post_stage = db.scalar(
-            select(StageState).where(
-                StageState.project_id == project_id,
-                StageState.stage_key == "post",
-            )
-        )
-        if (
-            not post_stage
-            or post_stage.status != "accepted"
-            or delivery_master.edit_package_id != (post_stage.decision or {}).get("edit_package_id")
-        ):
-            raise HTTPException(409, "delivery_master_source_package_is_stale")
+    try:
+        media_candidates = validate_media_decision(db, project, stage, stage_key)
+    except MediaDecisionError as error:
+        raise HTTPException(409, error.detail) from None
+    keyframe_candidate = media_candidates.keyframe
+    video_candidate = media_candidates.video
+    audio_candidate = media_candidates.audio
+    voice_script = media_candidates.voice_script
+    edit_package = media_candidates.edit_package
+    delivery_master = media_candidates.delivery_master
     if (
         stage_key in {"characters", "art"}
         and data.action == "accept"

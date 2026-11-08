@@ -70,9 +70,9 @@ def decide_stage(
 ):
     project = project_or_404(db, project_id)
     stage = db.scalar(
-        select(StageState).where(
-            StageState.project_id == project_id, StageState.stage_key == stage_key
-        )
+        select(StageState)
+        .where(StageState.project_id == project_id, StageState.stage_key == stage_key)
+        .with_for_update()
     )
     if not stage:
         raise HTTPException(404, "stage_not_found")

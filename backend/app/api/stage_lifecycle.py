@@ -20,9 +20,9 @@ router = APIRouter()
 def start_stage(project_id: str, stage_key: str, db: Session = Depends(get_db)):
     project = project_or_404(db, project_id)
     stage = db.scalar(
-        select(StageState).where(
-            StageState.project_id == project_id, StageState.stage_key == stage_key
-        )
+        select(StageState)
+        .where(StageState.project_id == project_id, StageState.stage_key == stage_key)
+        .with_for_update()
     )
     if not stage:
         raise HTTPException(404, "stage_not_found")
@@ -82,9 +82,9 @@ def start_stage(project_id: str, stage_key: str, db: Session = Depends(get_db)):
 def submit_stage_review(project_id: str, stage_key: str, db: Session = Depends(get_db)):
     project_or_404(db, project_id)
     stage = db.scalar(
-        select(StageState).where(
-            StageState.project_id == project_id, StageState.stage_key == stage_key
-        )
+        select(StageState)
+        .where(StageState.project_id == project_id, StageState.stage_key == stage_key)
+        .with_for_update()
     )
     if not stage:
         raise HTTPException(404, "stage_not_found")

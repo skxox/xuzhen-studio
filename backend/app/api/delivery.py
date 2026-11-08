@@ -128,6 +128,7 @@ def create_delivery_master(project_id: str, db: Session = Depends(get_db)):
             "rights_status": project.rights_status,
             "timing_basis": "requested_clip_durations",
             "audio_sync_basis": "srt_cue_start_with_ffprobe_duration_fit",
+            "video_sync_basis": "ffprobe_normalized_to_requested_duration_with_tail_freeze",
             "render_profile": {
                 "video_codec": "libx264",
                 "video_crf": 20,

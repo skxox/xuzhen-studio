@@ -1,4 +1,5 @@
 import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,6 +64,8 @@ def inspect_master(
         container_duration = float(container["duration"])
     except (KeyError, TypeError, ValueError) as error:
         raise MediaProbeError("ffprobe_metadata_invalid") from error
+    if not math.isfinite(container_duration) or container_duration <= 0:
+        raise MediaProbeError("ffprobe_metadata_invalid")
     if "mp4" not in container.get("format_name", "").split(","):
         raise MediaProbeError("master_container_is_not_mp4")
     videos = [stream for stream in streams if stream.get("codec_type") == "video"]
@@ -86,6 +89,8 @@ def inspect_master(
         raise MediaProbeError("master_subtitle_cue_count_mismatch")
     video_duration = _stream_duration(video, container_duration)
     audio_duration = _stream_duration(audio, container_duration)
+    if not math.isfinite(video_duration) or not math.isfinite(audio_duration):
+        raise MediaProbeError("ffprobe_metadata_invalid")
     tolerance = max(0.5, expected_duration * 0.01)
     duration_delta = abs(video_duration - expected_duration)
     if any(
@@ -123,6 +128,14 @@ def inspect_master(
 
 
 def probe_audio_duration(path: Path, ffprobe_binary: str) -> float:
+    return _probe_stream_duration(path, ffprobe_binary, "audio")
+
+
+def probe_video_duration(path: Path, ffprobe_binary: str) -> float:
+    return _probe_stream_duration(path, ffprobe_binary, "video")
+
+
+def _probe_stream_duration(path: Path, ffprobe_binary: str, stream_type: str) -> float:
     executable = shutil.which(ffprobe_binary)
     if not executable:
         raise MediaProbeError("ffprobe_unavailable")
@@ -139,23 +152,37 @@ def probe_audio_duration(path: Path, ffprobe_binary: str) -> float:
     try:
         result = subprocess.run(command, capture_output=True, timeout=15, check=False)
     except subprocess.TimeoutExpired as error:
-        raise MediaProbeError("ffprobe_audio_check_timed_out") from error
+        raise MediaProbeError(f"ffprobe_{stream_type}_check_timed_out") from error
     except OSError as error:
         raise MediaProbeError("ffprobe_execution_failed") from error
     if result.returncode != 0:
-        raise MediaProbeError("dialogue_audio_probe_failed")
+        raise MediaProbeError(f"media_{stream_type}_probe_failed")
     payload = _parse_json(result.stdout)
     streams = payload.get("streams")
     if not isinstance(streams, list) or not any(
-        isinstance(stream, dict) and stream.get("codec_type") == "audio" for stream in streams
+        isinstance(stream, dict) and stream.get("codec_type") == stream_type for stream in streams
     ):
-        raise MediaProbeError("dialogue_audio_stream_missing")
+        raise MediaProbeError(f"media_{stream_type}_stream_missing")
+    matching_streams = [
+        stream
+        for stream in streams
+        if isinstance(stream, dict) and stream.get("codec_type") == stream_type
+    ]
+    stream_durations = []
+    for stream in matching_streams:
+        try:
+            stream_duration = float(stream["duration"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(stream_duration) and stream_duration > 0:
+            stream_durations.append(stream_duration)
     try:
-        duration = float(payload["format"]["duration"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise MediaProbeError("dialogue_audio_duration_invalid") from error
-    if duration <= 0:
-        raise MediaProbeError("dialogue_audio_duration_invalid")
+        format_duration = float(payload["format"]["duration"])
+    except (KeyError, TypeError, ValueError):
+        format_duration = 0
+    duration = max(stream_durations, default=format_duration)
+    if not math.isfinite(duration) or duration <= 0:
+        raise MediaProbeError(f"media_{stream_type}_duration_invalid")
     return duration
 
 

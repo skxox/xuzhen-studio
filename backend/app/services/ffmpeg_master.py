@@ -14,6 +14,7 @@ from .media_quality import (
     ffprobe_available,
     inspect_master,
     probe_audio_duration,
+    probe_video_duration,
 )
 
 MAX_MASTER_BYTES = 2_000_000_000
@@ -94,6 +95,12 @@ def render_master(
             raise MasterRenderError("edit_package_subtitles_missing")
         audio = _align_audio_to_subtitles(audio, subtitle_path)
         video_paths = [_asset_path(work_dir, shot.get("asset")) for shot in shots]
+        try:
+            shots, video_fit = _fit_video_clips_to_requested_duration(
+                shots, video_paths, ffprobe_binary
+            )
+        except MediaProbeError as error:
+            raise MasterRenderError(str(error)) from error
         audio_paths = [_asset_path(work_dir, clip.get("asset")) for clip in audio]
         duration = sum(_positive_number(shot.get("duration_seconds_requested")) for shot in shots)
         if duration <= 0 or duration > 60 * 60:
@@ -108,6 +115,7 @@ def render_master(
         _run_ffmpeg(
             binary=ffmpeg_binary,
             video_paths=video_paths,
+            video_clips=shots,
             audio_paths=audio_paths,
             audio_clips=audio,
             subtitle_path=subtitle_path,
@@ -139,6 +147,7 @@ def render_master(
             expected_subtitle_count=dialogue_fit["clip_count"],
         )
         quality_report["dialogue_audio_fit"] = dialogue_fit
+        quality_report["video_timing_fit"] = video_fit
     except MediaProbeError as error:
         output_path.unlink(missing_ok=True)
         raise MasterRenderError(str(error)) from error
@@ -206,6 +215,7 @@ def _run_ffmpeg(
     *,
     binary: str,
     video_paths: list[Path],
+    video_clips: list[dict],
     audio_paths: list[Path],
     audio_clips: list[dict],
     subtitle_path: Path,
@@ -220,12 +230,14 @@ def _run_ffmpeg(
     inputs.extend(["-i", str(subtitle_path)])
     filters = []
     video_labels = []
-    for index in range(len(video_paths)):
+    for index, shot in enumerate(video_clips):
+        target_duration = shot["duration_seconds_requested"]
         label = f"v{index}"
         filters.append(
             f"[{index}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30,"
-            f"format=yuv420p,setpts=PTS-STARTPTS[{label}]"
+            f"format=yuv420p,tpad=stop_mode=clone:stop_duration={target_duration:.3f},"
+            f"trim=duration={target_duration:.3f},setpts=PTS-STARTPTS[{label}]"
         )
         video_labels.append(f"[{label}]")
     filters.append(f"{''.join(video_labels)}concat=n={len(video_paths)}:v=1:a=0[vout]")
@@ -395,6 +407,43 @@ def _fit_audio_to_subtitle_windows(
         "speed_adjusted_count": adjusted_count,
         "max_tempo": round(max_tempo, 3),
         "tempo_limit": MAX_DIALOGUE_TEMPO,
+    }
+
+
+def _fit_video_clips_to_requested_duration(
+    shots: list[dict], video_paths: list[Path], ffprobe_binary: str
+) -> tuple[list[dict], dict]:
+    if len(shots) != len(video_paths) or not shots:
+        raise MasterRenderError("edit_package_video_mapping_invalid")
+    with ThreadPoolExecutor(max_workers=min(8, len(video_paths))) as executor:
+        durations = list(
+            executor.map(lambda path: probe_video_duration(path, ffprobe_binary), video_paths)
+        )
+    fitted = []
+    trimmed_count = 0
+    held_count = 0
+    max_delta = 0.0
+    for shot, actual_duration in zip(shots, durations, strict=True):
+        requested = _positive_number(shot.get("duration_seconds_requested"))
+        delta = actual_duration - requested
+        max_delta = max(max_delta, abs(delta))
+        trimmed_count += delta > 0.05
+        held_count += delta < -0.05
+        fitted.append(
+            {
+                **shot,
+                "source_duration_seconds": round(actual_duration, 3),
+                "timing_adjustment": (
+                    "trim" if delta > 0.05 else "hold_last_frame" if delta < -0.05 else "none"
+                ),
+            }
+        )
+    return fitted, {
+        "passed": True,
+        "clip_count": len(fitted),
+        "trimmed_count": trimmed_count,
+        "held_last_frame_count": held_count,
+        "max_duration_delta_seconds": round(max_delta, 3),
     }
 
 

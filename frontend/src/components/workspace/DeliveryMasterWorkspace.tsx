@@ -81,8 +81,8 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
         </Badge>
       </div>
       <p>
-        按镜头顺序拼接视频，将逐句配音按字幕时间位置混合，并嵌入可切换的中文字幕轨。FFprobe
-        会检查容器、视频/音频/字幕轨、数据包和实测时长。配音最多加速 20%
+        按镜头顺序拼接视频，将逐句配音按字幕时间位置混合，并嵌入可切换的中文字幕轨。镜头会按计划时长裁剪或冻结末帧补足；FFprobe
+        检查容器、视频/音频/字幕轨、数据包和实测时长。配音最多加速 20%
         以适配字幕窗口；超出时会阻止合成。
       </p>
       {!runtimeQuery.isLoading && !runtimeQuery.data?.master_render_available && (
@@ -125,6 +125,18 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
               ) : (
                 ' · 缺少对白时间适配检查，请重新合成'
               )}
+              {qualityReport.video_timing_fit?.passed ? (
+                <>
+                  {' '}
+                  · 镜头时长处理：裁短 {
+                    qualityReport.video_timing_fit.trimmed_count
+                  } 条，末帧补足 {qualityReport.video_timing_fit.held_last_frame_count}{' '}
+                  条，最大源时长偏差{' '}
+                  {qualityReport.video_timing_fit.max_duration_delta_seconds.toFixed(2)} 秒
+                </>
+              ) : (
+                ' · 缺少镜头时长校准检查，请重新合成'
+              )}
             </p>
           ) : (
             <p className="form-error">该母版没有新版 FFprobe 质量报告，请退回并重新合成。</p>
@@ -151,7 +163,8 @@ export function DeliveryMasterWorkspace({ project, deliveryStatus, postStatus }:
               disabled={
                 decide.isPending ||
                 !qualityReport?.passed ||
-                !qualityReport.dialogue_audio_fit?.passed
+                !qualityReport.dialogue_audio_fit?.passed ||
+                !qualityReport.video_timing_fit?.passed
               }
             >
               验收最终母版

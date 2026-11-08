@@ -318,6 +318,13 @@ export interface MasterQualityReport {
     max_tempo: number;
     tempo_limit: number;
   };
+  video_timing_fit: {
+    passed: boolean;
+    clip_count: number;
+    trimmed_count: number;
+    held_last_frame_count: number;
+    max_duration_delta_seconds: number;
+  };
 }
 
 export interface ApiHealth {

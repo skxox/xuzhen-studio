@@ -27,7 +27,7 @@ export function SettingsPage({ project }: { project?: Project }) {
       next === 'text'
         ? 'openai-compatible-chat'
         : next === 'image'
-          ? 'comfyui'
+          ? 'openai-compatible-image'
           : next === 'audio'
             ? 'openai-compatible-audio'
             : 'custom',
@@ -82,8 +82,8 @@ export function SettingsPage({ project }: { project?: Project }) {
         <Shield size={16} />
         <span>
           <b>安全边界：</b>真实 API Key 不进入浏览器或数据库；请在后端环境变量{' '}
-          <code>XZ_PROVIDER_SECRETS</code> 中配置密钥引用。当前已接入 OpenAI
-          兼容文本生成；图片、视频和语音档案仍需对应 Adapter 后才能执行。
+          <code>XZ_PROVIDER_SECRETS</code> 中配置密钥引用。当前已接入 OpenAI 兼容文本生成和 OpenAI
+          兼容图片生成；视频和语音档案仍需对应 Adapter 后才能执行。
         </span>
       </div>
       <div className="settings-layout">
@@ -133,6 +133,7 @@ export function SettingsPage({ project }: { project?: Project }) {
               <Field label="协议 / Adapter">
                 <SelectInput value={adapter} onChange={(event) => setAdapter(event.target.value)}>
                   <option value="openai-compatible-chat">OpenAI-compatible Chat</option>
+                  <option value="openai-compatible-image">OpenAI-compatible Image</option>
                   <option value="openai-compatible-audio">OpenAI-compatible Audio</option>
                   <option value="comfyui">ComfyUI</option>
                   <option value="custom">已注册的自定义 Adapter</option>
@@ -149,7 +150,14 @@ export function SettingsPage({ project }: { project?: Project }) {
                 </SelectInput>
               </Field>
             </div>
-            <Field label="API Endpoint" hint="远程服务要求 HTTPS；本机 HTTP 仅允许 loopback。">
+            <Field
+              label="API Endpoint"
+              hint={
+                modality === 'image' && adapter === 'openai-compatible-image'
+                  ? '填写 OpenAI 兼容 API 根地址（如 /v1）；需提供 /images/generations 与 /models，图片响应需含 b64_json。远程 HTTPS，本机 HTTP 仅允许 loopback。'
+                  : '填写 API 根地址；远程服务要求 HTTPS，本机 HTTP 仅允许 loopback。'
+              }
+            >
               <TextInput
                 type="url"
                 required
@@ -270,7 +278,9 @@ function ProfileRow({ projectId, profile }: { projectId: string; profile: Servic
           ? Volume2
           : Video;
   const connected = profile.connection_test?.status === 'connected';
-  const supported = profile.modality === 'text' && profile.adapter_id === 'openai-compatible-chat';
+  const supported =
+    (profile.modality === 'text' && profile.adapter_id === 'openai-compatible-chat') ||
+    (profile.modality === 'image' && profile.adapter_id === 'openai-compatible-image');
   return (
     <div className="profile-row">
       <span className="profile-row__icon">

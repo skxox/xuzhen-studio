@@ -48,7 +48,7 @@ const stageRoutes: Record<string, string> = {
   art: '/assets',
   script: '/writing',
   shotDesign: '/writing/storyboard',
-  keyframes: '/storyboard',
+  keyframes: '/writing/keyframes',
   video: '/storyboard',
   post: '/delivery',
   delivery: '/delivery',
@@ -278,16 +278,18 @@ function StageInspector({
       </aside>
     );
   const route =
-    stage.stage_key === 'shotDesign' && project?.creation_mode === 'original'
-      ? '/writing/storyboard'
-      : stage.stage_key === 'source' && project?.creation_mode === 'original'
-        ? '/writing/adaptation'
-        : stage.stage_key === 'outline' && project?.creation_mode === 'original'
-          ? '/writing/adaptation-outline'
-          : ['characters', 'art', 'script'].includes(stage.stage_key) &&
-              project?.creation_mode === 'original'
-            ? '/writing/script'
-            : (stageRoutes[stage.stage_key] ?? '/');
+    stage.stage_key === 'keyframes' && project?.creation_mode === 'original'
+      ? '/writing/keyframes'
+      : stage.stage_key === 'shotDesign' && project?.creation_mode === 'original'
+        ? '/writing/storyboard'
+        : stage.stage_key === 'source' && project?.creation_mode === 'original'
+          ? '/writing/adaptation'
+          : stage.stage_key === 'outline' && project?.creation_mode === 'original'
+            ? '/writing/adaptation-outline'
+            : ['characters', 'art', 'script'].includes(stage.stage_key) &&
+                project?.creation_mode === 'original'
+              ? '/writing/script'
+              : (stageRoutes[stage.stage_key] ?? '/');
   const status = statusLabel(stage.status);
   const params = job?.input_snapshot.parameters;
   return (

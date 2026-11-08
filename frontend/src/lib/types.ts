@@ -182,6 +182,25 @@ export interface ShotPlanRelease {
   created_at: string;
 }
 
+export interface KeyframeCandidate {
+  id: string;
+  branch_id: string;
+  shot_plan_release_id: string;
+  job_id: string;
+  episode_number: number;
+  scene_number: number;
+  shot_number: number;
+  storage_key: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  prompt: string;
+  provider_snapshot: Record<string, unknown>;
+  status: 'needs_review' | 'accepted' | 'rejected' | 'superseded';
+  created_at: string;
+  file_url: string;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

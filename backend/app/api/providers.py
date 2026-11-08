@@ -106,7 +106,10 @@ def test_service_profile(
     profile = db.get(ServiceProfile, profile_id)
     if not profile or profile.project_id != project_id:
         raise HTTPException(404, "service_profile_not_found")
-    if profile.modality != "text" or profile.adapter_id != "openai-compatible-chat":
+    supported_profile = (
+        profile.modality == "text" and profile.adapter_id == "openai-compatible-chat"
+    ) or (profile.modality == "image" and profile.adapter_id == "openai-compatible-image")
+    if not supported_profile:
         raise HTTPException(409, "connection_test_not_supported_for_adapter")
 
     tested_at = datetime.now(UTC).isoformat()
@@ -179,7 +182,7 @@ def test_service_profile(
             **result,
             "profile_id": profile.id,
             "execution_ready": True,
-            "message": "服务端已验证连接与模型 ID；该文本服务可用于生成候选。",
+            "message": f"服务端已验证连接与模型 ID；该 {profile.modality} 服务可用于生成候选。",
         }
     except OSError as error:
         code = (

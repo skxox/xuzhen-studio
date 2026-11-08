@@ -12,6 +12,7 @@ import type {
   CreativeBrief,
   CreativeBriefSaveInput,
   GenerationJobSummary,
+  KeyframeCandidate,
   ManuscriptRelease,
   Project,
   ProjectCreateInput,
@@ -110,6 +111,10 @@ export const api = {
     request<ScriptRelease[]>(`/projects/${projectId}/script-releases`),
   shotPlanReleases: (projectId: string) =>
     request<ShotPlanRelease[]>(`/projects/${projectId}/shot-plan-releases`),
+  keyframeCandidates: (projectId: string) =>
+    request<KeyframeCandidate[]>(`/projects/${projectId}/keyframe-candidates`),
+  keyframeFileUrl: (projectId: string, candidateId: string) =>
+    `${API_ROOT}/projects/${projectId}/keyframe-candidates/${candidateId}/file`,
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   job: (projectId: string, jobId: string) =>
     request<GenerationJobSummary>(`/projects/${projectId}/jobs/${jobId}`),
@@ -145,6 +150,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...body, modality: 'text' }),
     }),
+  createImageJob: (
+    projectId: string,
+    body: {
+      stage_key: string;
+      profile_id: string;
+      idempotency_key: string;
+      prompt: string;
+      parameters: Record<string, unknown>;
+      input_refs: string[];
+      scope: Record<string, string | number>;
+      data_authorized: boolean;
+    },
+  ) =>
+    request<{ id: string; status: string; error?: Record<string, unknown> }>(
+      `/projects/${projectId}/jobs`,
+      { method: 'POST', body: JSON.stringify({ ...body, modality: 'image' }) },
+    ),
   updateJobOutput: (projectId: string, jobId: string, content: string, revision: number) =>
     request<{
       id: string;

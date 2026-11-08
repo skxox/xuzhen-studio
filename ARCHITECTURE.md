@@ -81,7 +81,7 @@ uv run uvicorn app.main:app --reload
 
 ### M0：领域 API 基础（当前）
 
-项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、独立且追加写入的 ManuscriptRelease 版本、阶段启动/送审/决定状态机、上游门禁、Provider profile、原创故事圣经/长篇大纲/文学角色圣经文本候选、任务快照、输出持久化和审计事件。范围报告最多覆盖 20 个连续章节；全书长期记忆与 finding 单项修订跟踪仍需后续实现。退出：API 对外契约固定、结构化候选与 stage version 迁移设计完成。
+项目双入口和不同阶段路径、章节导入/修订/恢复、逐章原创正文生成与候选审阅、范围连续性审校、ManuscriptRelease、分集映射/大纲/剧本/分镜不可变版本、逐镜关键帧审阅、阶段门禁、Provider profile 与审计事件。文本可调用 OpenAI 兼容 Chat；关键帧可调用返回 `b64_json` 的 OpenAI 兼容 Images API，图片保存到开发媒体目录。生成仍在 API 请求内同步执行，且只实现上述两种协议。范围报告最多覆盖 20 个连续章节；全书长期记忆与 finding 单项修订跟踪仍需后续实现。
 
 ### M1：创作纵切片
 
@@ -89,7 +89,7 @@ uv run uvicorn app.main:app --reload
 
 ### M2：镜头与图片
 
-引入正式 Postgres/Redis/Object Storage、worker/outbox、候选与素材引用、ComfyUI 和一个真实图片 API Adapter。镜头字段及连续性 Finding 逐项闭环；关键帧审阅能回写镜头版本。
+仍需引入正式 Postgres/Redis/Object Storage、worker/outbox、ComfyUI Adapter 和资产生命周期。现有图片 Adapter 只覆盖 OpenAI 兼容 Images API 的 base64 响应；关键帧可按镜头生成、审阅、退回和重做，验收快照引用原分镜版本，不会反写或改动已锁定镜头。
 
 ### M3：异步视频
 
@@ -101,4 +101,4 @@ uv run uvicorn app.main:app --reload
 
 ## 当前不具备的生产条件
 
-当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、实际模型 Provider、图片/视频生成、媒体安全扫描和完整候选物化。不能用模拟任务宣称端到端已生成视频。每完成一项应更新规格差异表与 API schema。
+当前实现是后端开发基线，不是可部署生产系统：尚无认证/权限、Alembic、PostgreSQL/Redis/对象存储部署、后台 worker、密钥库、SSE、视频/语音 Provider、媒体安全扫描和端到端成片。已支持的文本/图片同步 API 不代表任意厂商协议已接入；图片只接受经过格式签名校验的 base64 PNG/JPEG/WebP 响应。不能宣称系统已生成完整视频。每完成一项应更新规格差异表与 API schema。

@@ -1,15 +1,20 @@
+import hashlib
+import json
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..core.config import settings
 from ..domain.models import (
     Chapter,
     GenerationJob,
     GenerationOutput,
     GenerationOutputVersion,
+    KeyframeCandidate,
     ServiceProfile,
     StageState,
 )
@@ -26,8 +31,14 @@ from ..services.adaptation_mapping import (
     parse_storyboard_plan,
 )
 from ..services.continuity import ContinuityReportError, parse_continuity_report
+from ..services.keyframe_plan import (
+    KeyframePlanError,
+    current_shot_plan_release,
+    find_shot,
+)
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
+from ..services.openai_compatible_image import generate_image
 from .common import (
     audit,
     get_db,
@@ -43,6 +54,13 @@ from .schemas import (
 )
 
 router = APIRouter()
+
+
+def scope_number(scope: dict, key: str) -> int:
+    value = scope.get(key)
+    if type(value) is not int or value < 1:
+        raise KeyframePlanError(f"分镜范围缺少有效的 {key}。")
+    return value
 
 
 @router.post("/projects/{project_id}/jobs", status_code=202)
@@ -205,6 +223,32 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             or not required.issubset(set(data.input_refs))
         ):
             raise HTTPException(409, "storyboard_upstream_snapshot_changed")
+    if data.stage_key == "keyframes":
+        if data.modality != "image" or profile.adapter_id != "openai-compatible-image":
+            raise HTTPException(422, "keyframe_generation_requires_image_adapter")
+        try:
+            release = current_shot_plan_release(db, project)
+            episode_number = scope_number(data.scope, "episode_number")
+            scene_number = scope_number(data.scope, "scene_number")
+            shot_number = scope_number(data.scope, "shot_number")
+            shot = find_shot(release, episode_number, scene_number, shot_number)
+        except KeyframePlanError as error:
+            raise HTTPException(409, str(error)) from None
+        if (
+            data.scope.get("shot_plan_release_id") != release.id
+            or data.scope.get("base_prompt_hash")
+            != hashlib.sha256(shot["visual_prompt"].encode()).hexdigest()
+            or not {
+                release.id,
+                release.job_id,
+                release.script_release_id,
+                release.character_job_id,
+                release.art_job_id,
+            }.issubset(set(data.input_refs))
+        ):
+            raise HTTPException(409, "keyframe_shot_snapshot_changed")
+        if set(data.parameters) - {"size", "quality"}:
+            raise HTTPException(422, "unsupported_image_generation_parameters")
     if data.stage_key in {"characters", "art"} and project.creation_mode == "original":
         try:
             branch, outline_release, _ = current_adaptation_outline_context(db, project)
@@ -243,7 +287,11 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             raise HTTPException(409, "adaptation_asset_inputs_incomplete")
     if not data.data_authorized:
         raise HTTPException(422, "model_data_processing_consent_required")
-    supported = data.modality == "text" and profile.adapter_id == "openai-compatible-chat"
+    supported = (data.modality == "text" and profile.adapter_id == "openai-compatible-chat") or (
+        data.modality == "image"
+        and data.stage_key == "keyframes"
+        and profile.adapter_id == "openai-compatible-image"
+    )
     if not supported:
         job = GenerationJob(
             project_id=project_id,
@@ -311,7 +359,8 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         elif not parsed.path.rstrip("/").endswith("/v1"):
             completion_url = f"{completion_url}/v1"
         completion_url = f"{completion_url}/chat/completions"
-    target_ips = validate_provider_target(completion_url, profile.transport)
+    target_url = profile.endpoint if data.modality == "image" else completion_url
+    target_ips = validate_provider_target(target_url, profile.transport)
     job = GenerationJob(
         project_id=project_id,
         modality=data.modality,
@@ -357,14 +406,28 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             return replay_generation_job(db, existing, data)
         raise HTTPException(409, "generation_job_conflict") from None
     try:
-        content, usage = complete_chat(
-            endpoint=completion_url,
-            target_ip=target_ips[0],
-            model_id=profile.model_id,
-            secret=secret,
-            prompt=data.prompt,
-            parameters=data.parameters,
-        )
+        image_result = None
+        if data.modality == "image":
+            image_result = generate_image(
+                endpoint=profile.endpoint,
+                target_ip=target_ips[0],
+                model_id=profile.model_id,
+                secret=secret,
+                prompt=data.prompt,
+                size=str(data.parameters.get("size", "1024x1024")),
+                quality=data.parameters.get("quality"),
+            )
+            _, _, usage = image_result
+            content = ""
+        else:
+            content, usage = complete_chat(
+                endpoint=completion_url,
+                target_ip=target_ips[0],
+                model_id=profile.model_id,
+                secret=secret,
+                prompt=data.prompt,
+                parameters=data.parameters,
+            )
     except ProviderExecutionError as error:
         db.expire_all()
         stage = db.scalar(
@@ -656,6 +719,52 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
         )
     )
+    keyframe_candidate = None
+    if (
+        image_result
+        and stage
+        and stage.status == "running"
+        and stage.version == job.input_snapshot["stage_version"]
+    ):
+        image_bytes, image_type, _ = image_result
+        extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[image_type]
+        asset_id = str(uuid4())
+        relative_key = f"generated/{project_id}/{asset_id}{extension}"
+        path = settings.storage_dir / relative_key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(image_bytes)
+        scope = job.input_snapshot.get("scope") or {}
+        release = current_shot_plan_release(db, project)
+        keyframe_candidate = KeyframeCandidate(
+            project_id=project_id,
+            branch_id=release.branch_id,
+            shot_plan_release_id=release.id,
+            job_id=job.id,
+            episode_number=scope["episode_number"],
+            scene_number=scope["scene_number"],
+            shot_number=scope["shot_number"],
+            storage_key=relative_key,
+            content_type=image_type,
+            size_bytes=len(image_bytes),
+            sha256=hashlib.sha256(image_bytes).hexdigest(),
+            prompt=job.input_snapshot["prompt"],
+            provider_snapshot=job.provider_snapshot,
+        )
+        db.add(keyframe_candidate)
+        db.flush()
+        media_url = f"/api/projects/{project_id}/keyframe-candidates/{keyframe_candidate.id}/file"
+        content = json.dumps(
+            {
+                "keyframe_candidate_id": keyframe_candidate.id,
+                "shot_plan_release_id": release.id,
+                "episode_number": keyframe_candidate.episode_number,
+                "scene_number": keyframe_candidate.scene_number,
+                "shot_number": keyframe_candidate.shot_number,
+                "media_url": media_url,
+                "content_type": image_type,
+                "sha256": keyframe_candidate.sha256,
+            }
+        )
     output = GenerationOutput(
         project_id=project_id,
         job_id=job.id,
@@ -665,6 +774,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         or (data.stage_key == "outline" and project.creation_mode == "original")
         or (data.stage_key == "script" and project.creation_mode == "original")
         or (data.stage_key == "shotDesign" and project.creation_mode == "original")
+        or data.stage_key == "keyframes"
         else "text/markdown",
         content=content,
         metadata_json={"usage": usage},

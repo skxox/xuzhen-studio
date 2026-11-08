@@ -227,6 +227,9 @@ export function DeliveryPage({ project }: { project?: Project }) {
                 </a>
                 <details className="subtitle-editor">
                   <summary>在工作台编辑 SRT 字幕（保存会创建新版本）</summary>
+                  <p>
+                    此处用于微调字幕时间码。字幕文字需与已验收剧本和配音一致；修改台词请回到剧本阶段修订并重新生成配音。
+                  </p>
                   <textarea
                     rows={16}
                     value={currentSubtitleDraft ?? packageDetail?.subtitle_srt ?? ''}

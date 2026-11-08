@@ -150,6 +150,19 @@ def build_edit_package(
         raise EditPackageError("剪辑包内容超出当前 1 GB 上限。")
     subtitle_text = subtitle_override if subtitle_override is not None else _format_srt(subtitles)
     subtitle_rows = _parse_srt(subtitle_text, max_milliseconds=timeline_ms)
+    if subtitle_override is not None:
+        expected_texts = [f"{speaker}：{text}" for _, _, speaker, text in subtitles]
+        actual_texts = [text for _, _, text in subtitle_rows]
+        if len(actual_texts) != len(expected_texts):
+            raise EditPackageError("字幕条数必须与已验收剧本的对白条数一致。")
+        for index, (actual, expected) in enumerate(
+            zip(actual_texts, expected_texts, strict=True), 1
+        ):
+            if actual != expected:
+                raise EditPackageError(
+                    f"第 {index} 条字幕内容须与已验收剧本一致。"
+                    "如需修改台词，请先修订剧本并重新生成配音；此处只调整时间码。"
+                )
     entries.extend(
         [
             ("subtitles/zh-CN.srt", subtitle_text.encode("utf-8-sig")),

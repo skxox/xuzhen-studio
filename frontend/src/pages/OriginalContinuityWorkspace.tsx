@@ -648,9 +648,14 @@ export function OriginalContinuityWorkspace({ project }: { project?: Project }) 
             </div>
           )}
           {releaseStage?.status === 'accepted' ? (
-            <Link className="text-link" to="/source">
-              返回原文与创意页 <ArrowLeft size={14} />
-            </Link>
+            <div className="button-row">
+              <Link className="text-link" to="/writing/adaptation">
+                创建或查看逐集改编分支 <ArrowLeft size={14} />
+              </Link>
+              <Link className="text-link" to="/source">
+                返回原文与创意页 <ArrowLeft size={14} />
+              </Link>
+            </div>
           ) : null}
         </Panel>
       ) : null}

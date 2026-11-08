@@ -1,0 +1,170 @@
+.handoff-prerequisite,
+.handoff-layout {
+  margin-top: 16px;
+}
+.handoff-prerequisite > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.handoff-prerequisite > div span,
+.handoff-prerequisite > a,
+.handoff-next a {
+  color: var(--muted);
+  font-size: 12px;
+}
+.handoff-prerequisite > a,
+.handoff-next a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.handoff-prerequisite p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  color: var(--warning, #bd8438);
+  font-size: 12px;
+}
+.handoff-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.38fr);
+  align-items: start;
+  gap: 16px;
+}
+.handoff-main,
+.handoff-history {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.handoff-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.panel-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.panel-heading-row h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 17px;
+}
+.panel-heading-row p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.handoff-actions,
+.handoff-review-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+.handoff-review-actions > .field {
+  flex: 1 1 220px;
+}
+.inline-error {
+  color: var(--danger, #c94d48);
+  font-size: 12px;
+}
+.episode-map-list {
+  display: grid;
+  gap: 12px;
+}
+.episode-map-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--canvas-raised);
+}
+.episode-map-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+.episode-map-card > header span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.episode-map-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.branch-current {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas-raised);
+}
+.branch-current p,
+.muted-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.branch-history-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.branch-history-item summary {
+  cursor: pointer;
+}
+.branch-history-item summary span {
+  float: right;
+  color: var(--muted);
+}
+.branch-history-item ol {
+  display: grid;
+  gap: 7px;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.handoff-next b {
+  display: block;
+  margin: 7px 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.handoff-next p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+@media (max-width: 1050px) {
+  .handoff-layout {
+    grid-template-columns: 1fr;
+  }
+  .handoff-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .handoff-fields,
+  .episode-map-fields {
+    grid-template-columns: 1fr;
+  }
+}

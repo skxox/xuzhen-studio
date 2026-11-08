@@ -13,6 +13,11 @@ from ..domain.models import (
     ServiceProfile,
     StageState,
 )
+from ..services.adaptation_mapping import (
+    EpisodeSourceMappingError,
+    current_release_chapters,
+    parse_episode_source_mapping,
+)
 from ..services.continuity import ContinuityReportError, parse_continuity_report
 from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
@@ -105,6 +110,30 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
             chapter_ids.add(latest_chapters[context_ordinal].id)
         if not chapter_ids.issubset(set(data.input_refs)):
             raise HTTPException(409, "continuity_scope_chapter_versions_changed")
+    if data.stage_key == "source" and project.creation_mode == "original":
+        scope = data.scope
+        release_id = scope.get("release_id")
+        episode_count = scope.get("episode_count")
+        episode_seconds = scope.get("episode_seconds")
+        aspect_ratio = scope.get("aspect_ratio")
+        if (
+            not isinstance(release_id, str)
+            or type(episode_count) is not int
+            or type(episode_seconds) is not int
+            or not isinstance(aspect_ratio, str)
+            or episode_count < 1
+            or episode_seconds < 10
+            or not aspect_ratio.strip()
+        ):
+            raise HTTPException(422, "adaptation_mapping_scope_invalid")
+        try:
+            _, release_chapters = current_release_chapters(db, project, release_id)
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(409, str(error)) from None
+        if episode_count > len(release_chapters):
+            raise HTTPException(422, "episode_count_exceeds_locked_chapter_count")
+        if not {chapter.id for chapter in release_chapters}.issubset(set(data.input_refs)):
+            raise HTTPException(409, "adaptation_mapping_release_chapters_changed")
     if not data.data_authorized:
         raise HTTPException(422, "model_data_processing_consent_required")
     supported = data.modality == "text" and profile.adapter_id == "openai-compatible-chat"
@@ -347,6 +376,43 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
                 "error": job.error,
                 "provider_snapshot": job.provider_snapshot,
             }
+    if data.stage_key == "source" and project.creation_mode == "original":
+        try:
+            scope = job.input_snapshot.get("scope") or {}
+            _, release_chapters = current_release_chapters(
+                db, project, str(scope.get("release_id", ""))
+            )
+            parse_episode_source_mapping(
+                content,
+                expected_release_id=scope["release_id"],
+                expected_episode_count=scope["episode_count"],
+                expected_episode_seconds=scope["episode_seconds"],
+                expected_aspect_ratio=scope["aspect_ratio"],
+                allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
+            )
+        except (EpisodeSourceMappingError, KeyError) as error:
+            stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id, StageState.stage_key == data.stage_key
+                )
+            )
+            job.status = "failed"
+            job.error = {"code": "invalid_episode_source_mapping", "message": str(error)}
+            if (
+                stage
+                and stage.status == "running"
+                and stage.version == job.input_snapshot["stage_version"]
+            ):
+                stage.status = "failed"
+                stage.version += 1
+            audit(db, project_id, "job.failed", job.id, job.error)
+            db.commit()
+            return {
+                "id": job.id,
+                "status": job.status,
+                "error": job.error,
+                "provider_snapshot": job.provider_snapshot,
+            }
     stage = db.scalar(
         select(StageState).where(
             StageState.project_id == project_id, StageState.stage_key == data.stage_key
@@ -357,6 +423,7 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         job_id=job.id,
         content_type="application/json"
         if data.stage_key in {"novelDraft", "continuity"}
+        or (data.stage_key == "source" and project.creation_mode == "original")
         else "text/markdown",
         content=content,
         metadata_json={"usage": usage},
@@ -475,6 +542,24 @@ def edit_generation_output(
             )
         except ContinuityReportError as error:
             raise HTTPException(422, str(error)) from None
+    if job.stage_key == "source":
+        project = project_or_404(db, project_id)
+        if project.creation_mode == "original":
+            try:
+                scope = job.input_snapshot.get("scope") or {}
+                _, release_chapters = current_release_chapters(
+                    db, project, str(scope.get("release_id", ""))
+                )
+                parse_episode_source_mapping(
+                    data.content,
+                    expected_release_id=scope["release_id"],
+                    expected_episode_count=scope["episode_count"],
+                    expected_episode_seconds=scope["episode_seconds"],
+                    expected_aspect_ratio=scope["aspect_ratio"],
+                    allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
+                )
+            except (EpisodeSourceMappingError, KeyError) as error:
+                raise HTTPException(422, str(error)) from None
     db.add(
         GenerationOutputVersion(
             output_id=output.id,

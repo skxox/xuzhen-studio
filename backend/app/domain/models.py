@@ -82,6 +82,47 @@ class ManuscriptRelease(Timestamped, Base):
     )
 
 
+class AdaptationBranch(Timestamped, Base):
+    __tablename__ = "adaptation_branches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    release_id: Mapped[str] = mapped_column(
+        ForeignKey("manuscript_releases.id", ondelete="RESTRICT"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    episode_count: Mapped[int] = mapped_column(Integer)
+    episode_seconds: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(16))
+    previous_branch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="RESTRICT"), nullable=True
+    )
+    __table_args__ = (
+        UniqueConstraint("project_id", "revision", name="uq_adaptation_branch_revision"),
+    )
+
+
+class EpisodeSourceMapping(Timestamped, Base):
+    __tablename__ = "episode_source_mappings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("adaptation_branches.id", ondelete="CASCADE"), index=True
+    )
+    episode_number: Mapped[int] = mapped_column(Integer)
+    chapter_ordinals: Mapped[list[int]] = mapped_column(JSON)
+    target: Mapped[str] = mapped_column(Text)
+    conflict: Mapped[str] = mapped_column(Text)
+    turn: Mapped[str] = mapped_column(Text)
+    ending_hook: Mapped[str] = mapped_column(Text)
+    preserve_facts: Mapped[str] = mapped_column(Text)
+    allowed_changes: Mapped[str] = mapped_column(Text)
+    adaptation_note: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("branch_id", "episode_number", name="uq_branch_episode_mapping"),
+    )
+
+
 class CharacterReference(Timestamped, Base):
     __tablename__ = "character_references"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

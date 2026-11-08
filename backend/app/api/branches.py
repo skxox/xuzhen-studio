@@ -1,0 +1,70 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..domain.models import AdaptationBranch, EpisodeSourceMapping, StageState
+from .common import get_db, project_or_404
+
+router = APIRouter()
+
+
+@router.get("/projects/{project_id}/adaptation-branches")
+def list_adaptation_branches(project_id: str, db: Session = Depends(get_db)):
+    project_or_404(db, project_id)
+    source_stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project_id,
+            StageState.stage_key == "source",
+        )
+    )
+    current_branch_id = (
+        (source_stage.decision or {}).get("branch_id")
+        if source_stage and source_stage.status == "accepted"
+        else None
+    )
+    branches = db.scalars(
+        select(AdaptationBranch)
+        .where(AdaptationBranch.project_id == project_id)
+        .order_by(AdaptationBranch.revision.desc())
+    ).all()
+    mapping_rows = (
+        db.scalars(
+            select(EpisodeSourceMapping)
+            .where(EpisodeSourceMapping.branch_id.in_([branch.id for branch in branches]))
+            .order_by(EpisodeSourceMapping.episode_number)
+        ).all()
+        if branches
+        else []
+    )
+    mappings_by_branch: dict[str, list[EpisodeSourceMapping]] = {}
+    for mapping in mapping_rows:
+        mappings_by_branch.setdefault(mapping.branch_id, []).append(mapping)
+    return [
+        {
+            "id": branch.id,
+            "project_id": branch.project_id,
+            "release_id": branch.release_id,
+            "revision": branch.revision,
+            "episode_count": branch.episode_count,
+            "episode_seconds": branch.episode_seconds,
+            "aspect_ratio": branch.aspect_ratio,
+            "previous_branch_id": branch.previous_branch_id,
+            "is_current": branch.id == current_branch_id,
+            "created_at": branch.created_at,
+            "episodes": [
+                {
+                    "episode_number": item.episode_number,
+                    "chapter_ordinals": item.chapter_ordinals,
+                    "target": item.target,
+                    "conflict": item.conflict,
+                    "turn": item.turn,
+                    "ending_hook": item.ending_hook,
+                    "preserve_facts": item.preserve_facts,
+                    "allowed_changes": item.allowed_changes,
+                    "adaptation_note": item.adaptation_note,
+                }
+                for item in mappings_by_branch.get(branch.id, [])
+            ],
+        }
+        for branch in branches
+    ]

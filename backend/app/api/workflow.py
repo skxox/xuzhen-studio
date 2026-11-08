@@ -5,14 +5,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..domain.models import (
+    AdaptationBranch,
     Chapter,
     CommercialBrief,
     CommercialMaterial,
     CreativeBrief,
+    EpisodeSourceMapping,
     GenerationJob,
     GenerationOutput,
     ManuscriptRelease,
     StageState,
+)
+from ..services.adaptation_mapping import (
+    EpisodeSourceMappingError,
+    current_release_chapters,
+    parse_episode_source_mapping,
 )
 from ..services.continuity import (
     ContinuityReportError,
@@ -83,6 +90,54 @@ def decide_stage(
             raise HTTPException(422, "source_requires_at_least_one_chapter")
         if project.rights_status == "unconfirmed":
             raise HTTPException(422, "source_rights_must_be_recorded")
+    mapping_decision = None
+    if stage_key == "source" and data.action == "accept" and project.creation_mode == "original":
+        if project.rights_status == "unconfirmed":
+            raise HTTPException(422, "original_work_rights_must_be_recorded")
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        candidate_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == candidate_job_id,
+                GenerationJob.project_id == project_id,
+                GenerationJob.stage_key == "source",
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(
+                select(GenerationOutput).where(
+                    GenerationOutput.project_id == project_id,
+                    GenerationOutput.job_id == candidate_job_id,
+                )
+            )
+            if candidate_job
+            else None
+        )
+        scope = (candidate_job.input_snapshot.get("scope") or {}) if candidate_job else {}
+        if not candidate_job or not output:
+            raise HTTPException(409, "episode_source_mapping_candidate_missing")
+        try:
+            release, release_chapters = current_release_chapters(
+                db, project, str(scope.get("release_id", ""))
+            )
+            mapping = parse_episode_source_mapping(
+                output.content,
+                expected_release_id=release.id,
+                expected_episode_count=scope["episode_count"],
+                expected_episode_seconds=scope["episode_seconds"],
+                expected_aspect_ratio=scope["aspect_ratio"],
+                allowed_chapter_ordinals={chapter.ordinal for chapter in release_chapters},
+            )
+        except (EpisodeSourceMappingError, KeyError) as error:
+            raise HTTPException(422, str(error)) from None
+        mapping_decision = {
+            "candidate_job_id": candidate_job.id,
+            "release_id": release.id,
+            "episode_count": mapping.episode_count,
+            "episode_seconds": mapping.episode_seconds,
+            "aspect_ratio": mapping.aspect_ratio,
+            "episodes": mapping.episodes,
+        }
     continuity_decision = None
     release_decision = None
     if stage_key == "continuity" and data.action == "accept":
@@ -275,6 +330,56 @@ def decide_stage(
         release_decision["previous_release_id"] = release.previous_release_id
         stage.decision = release_decision
         audit(db, project_id, "manuscript.release_locked", release.id, release_decision)
+    elif stage_key == "source" and data.action == "accept" and mapping_decision:
+        previous_branch = db.scalar(
+            select(AdaptationBranch)
+            .where(AdaptationBranch.project_id == project_id)
+            .order_by(AdaptationBranch.revision.desc())
+            .limit(1)
+        )
+        branch = AdaptationBranch(
+            project_id=project_id,
+            release_id=mapping_decision["release_id"],
+            revision=(previous_branch.revision + 1) if previous_branch else 1,
+            episode_count=mapping_decision["episode_count"],
+            episode_seconds=mapping_decision["episode_seconds"],
+            aspect_ratio=mapping_decision["aspect_ratio"],
+            previous_branch_id=previous_branch.id if previous_branch else None,
+        )
+        db.add(branch)
+        db.flush()
+        for episode in mapping_decision["episodes"]:
+            db.add(
+                EpisodeSourceMapping(
+                    branch_id=branch.id,
+                    episode_number=episode.episode_number,
+                    chapter_ordinals=episode.chapter_ordinals,
+                    target=episode.target,
+                    conflict=episode.conflict,
+                    turn=episode.turn,
+                    ending_hook=episode.ending_hook,
+                    preserve_facts=episode.preserve_facts,
+                    allowed_changes=episode.allowed_changes,
+                    adaptation_note=episode.adaptation_note,
+                )
+            )
+        stage.decision = {
+            "action": "accept",
+            "candidate_job_id": mapping_decision["candidate_job_id"],
+            "branch_id": branch.id,
+            "branch_revision": branch.revision,
+            "release_id": branch.release_id,
+            "episode_count": branch.episode_count,
+            "episode_seconds": branch.episode_seconds,
+            "aspect_ratio": branch.aspect_ratio,
+        }
+        audit(
+            db,
+            project_id,
+            "adaptation.branch_created",
+            branch.id,
+            {**stage.decision, "mapping_count": len(mapping_decision["episodes"])},
+        )
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"

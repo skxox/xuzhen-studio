@@ -53,6 +53,11 @@ const OriginalContinuityWorkspace = lazy(() =>
     default: page,
   })),
 );
+const OriginalAdaptationHandoffWorkspace = lazy(() =>
+  import('../pages/OriginalAdaptationHandoffWorkspace').then(
+    ({ OriginalAdaptationHandoffWorkspace: page }) => ({ default: page }),
+  ),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -372,9 +377,11 @@ function AppShell() {
         ? '逐章正文'
         : location.pathname === '/writing/continuity'
           ? '连续性审校'
-          : location.pathname === '/writing/characters'
-            ? '文学角色圣经'
-            : '故事与剧本'
+          : location.pathname === '/writing/adaptation'
+            ? '逐集改编交接'
+            : location.pathname === '/writing/characters'
+              ? '文学角色圣经'
+              : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -433,6 +440,10 @@ function AppShell() {
               <Route
                 path="/writing/continuity"
                 element={<OriginalContinuityWorkspace project={project} />}
+              />
+              <Route
+                path="/writing/adaptation"
+                element={<OriginalAdaptationHandoffWorkspace key={project?.id} project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

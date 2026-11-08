@@ -47,6 +47,30 @@ export interface ManuscriptRelease {
   created_at: string;
 }
 
+export interface AdaptationBranch {
+  id: string;
+  project_id: string;
+  release_id: string;
+  revision: number;
+  episode_count: number;
+  episode_seconds: number;
+  aspect_ratio: string;
+  previous_branch_id?: string | null;
+  is_current: boolean;
+  created_at: string;
+  episodes: Array<{
+    episode_number: number;
+    chapter_ordinals: number[];
+    target: string;
+    conflict: string;
+    turn: string;
+    ending_hook: string;
+    preserve_facts: string;
+    allowed_changes: string;
+    adaptation_note: string;
+  }>;
+}
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

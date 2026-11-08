@@ -216,7 +216,7 @@ export function CanvasPage({ project }: { project?: Project }) {
                 </div>
               </div>
             </Panel>
-            <StageInspector stage={selected} job={selectedJob} />
+            <StageInspector stage={selected} job={selectedJob} project={project} />
           </div>
         </>
       )}
@@ -259,7 +259,15 @@ function StageNodeCard({ data, selected }: NodeProps<StageFlowNode>) {
   );
 }
 
-function StageInspector({ stage, job }: { stage?: StageState; job?: GenerationJobSummary }) {
+function StageInspector({
+  stage,
+  job,
+  project,
+}: {
+  stage?: StageState;
+  job?: GenerationJobSummary;
+  project?: Project;
+}) {
   if (!stage)
     return (
       <aside className="graph-inspector">
@@ -269,7 +277,10 @@ function StageInspector({ stage, job }: { stage?: StageState; job?: GenerationJo
         </Panel>
       </aside>
     );
-  const route = stageRoutes[stage.stage_key] ?? '/';
+  const route =
+    stage.stage_key === 'source' && project?.creation_mode === 'original'
+      ? '/writing/adaptation'
+      : (stageRoutes[stage.stage_key] ?? '/');
   const status = statusLabel(stage.status);
   const params = job?.input_snapshot.parameters;
   return (

@@ -1,5 +1,6 @@
 import type {
   ApiHealth,
+  AdaptationBranch,
   Chapter,
   ChapterImportResult,
   CharacterReference,
@@ -98,6 +99,8 @@ export const api = {
   stages: (projectId: string) => request<StageState[]>(`/projects/${projectId}/stages`),
   manuscriptReleases: (projectId: string) =>
     request<ManuscriptRelease[]>(`/projects/${projectId}/manuscript-releases`),
+  adaptationBranches: (projectId: string) =>
+    request<AdaptationBranch[]>(`/projects/${projectId}/adaptation-branches`),
   jobs: (projectId: string) => request<GenerationJobSummary[]>(`/projects/${projectId}/jobs`),
   startStage: (projectId: string, stage: string) =>
     request<Pick<StageState, 'id' | 'stage_key' | 'status' | 'version'>>(

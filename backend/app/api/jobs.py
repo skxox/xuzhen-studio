@@ -44,7 +44,7 @@ from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candi
 from ..services.openai_compatible import ProviderExecutionError, complete_chat
 from ..services.openai_compatible_audio import generate_speech
 from ..services.openai_compatible_image import generate_image
-from ..services.openai_compatible_video import download_video, retrieve_video, submit_video
+from ..services.openai_compatible_video import submit_video
 from .common import (
     audit,
     get_db,
@@ -1112,133 +1112,6 @@ def create_job(project_id: str, data: JobCreate, db: Session = Depends(get_db)):
         "status": job.status,
         "output": safe_generation_output(output),
         "provider_snapshot": job.provider_snapshot,
-    }
-
-
-@router.post("/projects/{project_id}/jobs/{job_id}/refresh")
-def refresh_video_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
-    project_or_404(db, project_id)
-    job = db.scalar(
-        select(GenerationJob).where(
-            GenerationJob.id == job_id,
-            GenerationJob.project_id == project_id,
-            GenerationJob.stage_key == "video",
-        )
-    )
-    if not job:
-        raise HTTPException(404, "video_job_not_found")
-    candidate = db.scalar(select(VideoCandidate).where(VideoCandidate.job_id == job.id))
-    if not candidate:
-        raise HTTPException(409, "video_candidate_not_registered")
-    if job.status != "running" or candidate.status not in {"queued", "processing"}:
-        return _video_job_result(job, candidate)
-    stage = db.scalar(
-        select(StageState).where(
-            StageState.project_id == project_id, StageState.stage_key == "video"
-        )
-    )
-    if (
-        not stage
-        or stage.status != "running"
-        or stage.version != job.input_snapshot.get("stage_version")
-    ):
-        job.status = "stale"
-        candidate.status = "stale"
-        audit(db, project_id, "video.result_stale", candidate.id, {"job_id": job.id})
-        db.commit()
-        return _video_job_result(job, candidate)
-    profile = db.get(ServiceProfile, job.provider_snapshot.get("profile_id"))
-    if (
-        not profile
-        or profile.project_id != project_id
-        or profile.adapter_id != "openai-compatible-video"
-        or profile.version != job.provider_snapshot.get("profile_version")
-    ):
-        raise HTTPException(409, "video_provider_profile_snapshot_unavailable")
-    secret = resolve_provider_secret(profile.secret_ref)
-    if profile.secret_ref and not secret:
-        raise HTTPException(409, "provider_secret_reference_not_configured")
-    target_ips = validate_provider_target(profile.endpoint, profile.transport)
-    try:
-        task = retrieve_video(
-            endpoint=profile.endpoint,
-            target_ip=target_ips[0],
-            secret=secret,
-            task_id=candidate.provider_task_id,
-        )
-        candidate.progress = task.progress
-        if task.status == "failed":
-            candidate.status = "failed"
-            candidate.error = task.error or {"code": "provider_video_generation_failed"}
-            job.status = "failed"
-            job.error = candidate.error
-            stage.status = "failed"
-            stage.version += 1
-            audit(db, project_id, "video.failed", candidate.id, candidate.error)
-        elif task.status == "completed":
-            video_bytes = download_video(
-                endpoint=profile.endpoint,
-                target_ip=target_ips[0],
-                secret=secret,
-                task_id=candidate.provider_task_id,
-            )
-            relative_key = f"generated/{project_id}/{uuid4()}.mp4"
-            path = settings.storage_dir / relative_key
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(video_bytes)
-            candidate.storage_key = relative_key
-            candidate.content_type = "video/mp4"
-            candidate.size_bytes = len(video_bytes)
-            candidate.sha256 = hashlib.sha256(video_bytes).hexdigest()
-            candidate.status = "needs_review"
-            job.status = "succeeded"
-            output = db.scalar(select(GenerationOutput).where(GenerationOutput.job_id == job.id))
-            if output:
-                output.content = json.dumps(
-                    {
-                        "video_candidate_id": candidate.id,
-                        "provider_task_id": candidate.provider_task_id,
-                        "status": "completed",
-                        "progress": 100,
-                        "media_url": (
-                            f"/api/projects/{project_id}/video-candidates/{candidate.id}/file"
-                        ),
-                        "size_bytes": candidate.size_bytes,
-                        "sha256": candidate.sha256,
-                    }
-                )
-            stage.status = "needs_review"
-            stage.version += 1
-            stage.decision = {"candidate_job_id": job.id, "video_candidate_id": candidate.id}
-            audit(
-                db,
-                project_id,
-                "video.candidate_ready",
-                candidate.id,
-                {
-                    "job_id": job.id,
-                    "sha256": candidate.sha256,
-                    "size_bytes": candidate.size_bytes,
-                },
-            )
-        db.commit()
-    except ProviderExecutionError as error:
-        db.rollback()
-        raise HTTPException(error.http_status, error.code) from None
-    return _video_job_result(job, candidate)
-
-
-def _video_job_result(job: GenerationJob, candidate: VideoCandidate) -> dict:
-    return {
-        "id": job.id,
-        "status": job.status,
-        "error": job.error,
-        "video_candidate": {
-            "id": candidate.id,
-            "status": candidate.status,
-            "progress": candidate.progress,
-            "error": candidate.error,
-        },
     }
 
 

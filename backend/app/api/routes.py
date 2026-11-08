@@ -12,6 +12,7 @@ from .providers import router as providers_router
 from .releases import router as releases_router
 from .scripts import router as scripts_router
 from .storyboards import router as storyboards_router
+from .video_jobs import router as video_jobs_router
 from .workflow import router as workflow_router
 
 router = APIRouter()
@@ -28,3 +29,4 @@ router.include_router(post_router)
 router.include_router(delivery_router)
 router.include_router(jobs_router)
 router.include_router(job_queries_router)
+router.include_router(video_jobs_router)

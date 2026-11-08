@@ -2,11 +2,19 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..domain.contracts import AdaptationOutlineCandidate, EpisodeSourceMappingPlanCandidate
+from ..domain.contracts import (
+    AdaptationOutlineCandidate,
+    EpisodeSourceMappingPlanCandidate,
+    ScriptCandidate,
+)
 from ..domain.models import (
     AdaptationBranch,
+    AdaptationOutlineRelease,
     Chapter,
+    EpisodeAdaptationOutline,
     EpisodeSourceMapping,
+    GenerationJob,
+    GenerationOutput,
     ManuscriptRelease,
     Project,
     StageState,
@@ -91,6 +99,97 @@ def current_adaptation_branch(
     if any(not set(mapping.chapter_ordinals).issubset(allowed_ordinals) for mapping in mappings):
         raise EpisodeSourceMappingError("当前改编分支包含不属于锁版范围的章节。")
     return branch, mappings
+
+
+def current_adaptation_script_context(
+    db: Session, project: Project
+) -> tuple[
+    AdaptationBranch,
+    AdaptationOutlineRelease,
+    list[EpisodeAdaptationOutline],
+    GenerationJob,
+    GenerationJob,
+]:
+    branch, outline_release, outline_episodes = current_adaptation_outline_context(db, project)
+    accepted_jobs: list[GenerationJob] = []
+    for stage_key, label in (("characters", "角色"), ("art", "美术")):
+        stage = db.scalar(
+            select(StageState).where(
+                StageState.project_id == project.id,
+                StageState.stage_key == stage_key,
+            )
+        )
+        job_id = (
+            (stage.decision or {}).get("candidate_job_id")
+            if stage and stage.status == "accepted"
+            else None
+        )
+        job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == job_id,
+                GenerationJob.project_id == project.id,
+                GenerationJob.stage_key == stage_key,
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(select(GenerationOutput.id).where(GenerationOutput.job_id == job_id))
+            if job
+            else None
+        )
+        if not job or not output:
+            raise EpisodeSourceMappingError(
+                f"{label}阶段需要重新生成并验收一次，确保当前版本可追溯。"
+            )
+        scope = job.input_snapshot.get("scope") or {}
+        if (
+            scope.get("branch_id") != branch.id
+            or scope.get("outline_release_id") != outline_release.id
+            or outline_release.id not in job.input_snapshot.get("input_refs", [])
+        ):
+            raise EpisodeSourceMappingError(
+                f"{label}阶段验收版本不属于当前改编大纲，请重新生成并验收。"
+            )
+        accepted_jobs.append(job)
+    art_scope = accepted_jobs[1].input_snapshot.get("scope") or {}
+    if art_scope.get("character_job_id") != accepted_jobs[0].id or accepted_jobs[
+        0
+    ].id not in accepted_jobs[1].input_snapshot.get("input_refs", []):
+        raise EpisodeSourceMappingError("美术设定没有引用当前已验收的视频角色约束版本。")
+    return branch, outline_release, outline_episodes, accepted_jobs[0], accepted_jobs[1]
+
+
+def current_adaptation_outline_context(
+    db: Session, project: Project
+) -> tuple[AdaptationBranch, AdaptationOutlineRelease, list[EpisodeAdaptationOutline]]:
+    branch, _ = current_adaptation_branch(db, project)
+    outline_stage = db.scalar(
+        select(StageState).where(
+            StageState.project_id == project.id,
+            StageState.stage_key == "outline",
+        )
+    )
+    outline_release_id = (
+        (outline_stage.decision or {}).get("outline_release_id")
+        if outline_stage and outline_stage.status == "accepted"
+        else None
+    )
+    outline_release = db.scalar(
+        select(AdaptationOutlineRelease).where(
+            AdaptationOutlineRelease.id == outline_release_id,
+            AdaptationOutlineRelease.branch_id == branch.id,
+        )
+    )
+    if not outline_release:
+        raise EpisodeSourceMappingError("当前改编分支尚无已验收的视频改编大纲。")
+    outline_episodes = db.scalars(
+        select(EpisodeAdaptationOutline)
+        .where(EpisodeAdaptationOutline.outline_release_id == outline_release.id)
+        .order_by(EpisodeAdaptationOutline.episode_number)
+    ).all()
+    if len(outline_episodes) != outline_release.episode_count:
+        raise EpisodeSourceMappingError("当前已验收大纲的逐集场景记录不完整。")
+    return branch, outline_release, outline_episodes
 
 
 def parse_episode_source_mapping(
@@ -202,3 +301,98 @@ def parse_adaptation_outline(
                 f"第 {episode.episode_number} 集场次时长预算超过单集目标时长。"
             )
     return outline
+
+
+def parse_script_candidate(
+    content: str,
+    *,
+    branch_id: str,
+    release_id: str,
+    outline_release_id: str,
+    character_job_id: str,
+    art_job_id: str,
+    outline_episodes: list[dict],
+    chapter_bodies: dict[int, str],
+) -> ScriptCandidate:
+    try:
+        script = ScriptCandidate.model_validate_json(content)
+    except ValidationError as error:
+        raise EpisodeSourceMappingError("分集剧本格式无效，请检查候选字段。") from error
+    if (
+        script.branch_id != branch_id
+        or script.release_id != release_id
+        or script.outline_release_id != outline_release_id
+        or script.character_job_id != character_job_id
+        or script.art_job_id != art_job_id
+        or script.episode_count != len(outline_episodes)
+    ):
+        raise EpisodeSourceMappingError("剧本候选引用的分支、大纲或已验收角色/美术版本已变化。")
+    if [episode.episode_number for episode in script.episodes] != list(
+        range(1, len(outline_episodes) + 1)
+    ):
+        raise EpisodeSourceMappingError("剧本必须覆盖当前大纲全部集数，且集序连续。")
+    for episode, outline_episode in zip(script.episodes, outline_episodes, strict=True):
+        planned_scenes = outline_episode["scenes"]
+        if [scene.scene_number for scene in episode.scenes] != list(
+            range(1, len(planned_scenes) + 1)
+        ):
+            raise EpisodeSourceMappingError(
+                f"第 {episode.episode_number} 集必须完整沿用已验收大纲的场次结构。"
+            )
+        for scene, planned_scene in zip(episode.scenes, planned_scenes, strict=True):
+            if scene.scene_number != planned_scene["scene_number"]:
+                raise EpisodeSourceMappingError("剧本场次序号与已验收大纲不一致。")
+            allowed_ordinals = set(planned_scene["source_chapter_ordinals"])
+            if not scene.action.strip():
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场缺少动作描述。"
+                )
+            allocated_seconds = scene.action_seconds
+            if scene.action_seconds == 0 and not scene.dialogues:
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场没有分配"
+                    "动作或对白时长。"
+                )
+            if [line.dialogue_number for line in scene.dialogues] != list(
+                range(1, len(scene.dialogues) + 1)
+            ):
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场对白序号必须连续。"
+                )
+            for line in scene.dialogues:
+                allocated_seconds += line.estimated_seconds
+                if line.speaker not in planned_scene["character_names"] and line.speaker not in {
+                    "旁白",
+                    "解说",
+                    "VO",
+                }:
+                    raise EpisodeSourceMappingError(
+                        f"第 {episode.episode_number} 集第 {scene.scene_number} 场对白说话人"
+                        "不在已验收场景角色中。"
+                    )
+                if line.source_chapter_ordinals != sorted(set(line.source_chapter_ordinals)):
+                    raise EpisodeSourceMappingError("对白出处章节需去重并按原文顺序排列。")
+                if not set(line.source_chapter_ordinals).issubset(allowed_ordinals):
+                    raise EpisodeSourceMappingError(
+                        f"第 {episode.episode_number} 集第 {scene.scene_number} 场对白引用了"
+                        "其他场次的章节。"
+                    )
+                if not line.source_chapter_ordinals and not planned_scene["is_adaptation_addition"]:
+                    raise EpisodeSourceMappingError(
+                        f"第 {episode.episode_number} 集第 {scene.scene_number} 场对白缺少"
+                        "原文来源或新增场次标记。"
+                    )
+                if line.origin == "direct_quote":
+                    if not line.source_chapter_ordinals or not any(
+                        line.text in chapter_bodies.get(ordinal, "")
+                        for ordinal in line.source_chapter_ordinals
+                    ):
+                        raise EpisodeSourceMappingError(
+                            f"第 {episode.episode_number} 集含有无法在引用章节中定位的原文直引。"
+                        )
+            if allocated_seconds > planned_scene["estimated_seconds"]:
+                raise EpisodeSourceMappingError(
+                    f"第 {episode.episode_number} 集第 {scene.scene_number} 场的对白与动作"
+                    "时长超出大纲预算。"
+                )
+    return script

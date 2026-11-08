@@ -60,7 +60,7 @@ DEPENDENCIES = {
     "source": (),
     "outline": ("source",),
     "characters": ("outline",),
-    "art": ("outline",),
+    "art": ("outline", "characters"),
     "script": ("outline", "characters", "art"),
     "shotDesign": ("script", "characters", "art"),
     "keyframes": ("shotDesign",),

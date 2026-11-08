@@ -16,14 +16,18 @@ from ..domain.models import (
     GenerationJob,
     GenerationOutput,
     ManuscriptRelease,
+    ScriptRelease,
     StageState,
 )
 from ..services.adaptation_mapping import (
     EpisodeSourceMappingError,
     current_adaptation_branch,
+    current_adaptation_outline_context,
+    current_adaptation_script_context,
     current_release_chapters,
     parse_adaptation_outline,
     parse_episode_source_mapping,
+    parse_script_candidate,
 )
 from ..services.continuity import (
     ContinuityReportError,
@@ -183,6 +187,118 @@ def decide_stage(
         except EpisodeSourceMappingError as error:
             raise HTTPException(422, str(error)) from None
         outline_decision = {"candidate_job_id": candidate_job.id, "outline": outline}
+    script_decision = None
+    if stage_key == "script" and data.action == "accept" and project.creation_mode == "original":
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        candidate_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == candidate_job_id,
+                GenerationJob.project_id == project_id,
+                GenerationJob.stage_key == "script",
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(
+                select(GenerationOutput).where(
+                    GenerationOutput.project_id == project_id,
+                    GenerationOutput.job_id == candidate_job_id,
+                )
+            )
+            if candidate_job
+            else None
+        )
+        if not candidate_job or not output:
+            raise HTTPException(409, "episode_script_candidate_missing")
+        try:
+            branch, outline_release, outline_episodes, character_job, art_job = (
+                current_adaptation_script_context(db, project)
+            )
+            _, release_chapters = current_release_chapters(db, project, branch.release_id)
+            scope = candidate_job.input_snapshot.get("scope") or {}
+            if (
+                scope.get("branch_id") != branch.id
+                or scope.get("outline_release_id") != outline_release.id
+                or scope.get("character_job_id") != character_job.id
+                or scope.get("art_job_id") != art_job.id
+            ):
+                raise EpisodeSourceMappingError("剧本候选引用的上游版本已变化。")
+            script = parse_script_candidate(
+                output.content,
+                branch_id=branch.id,
+                release_id=branch.release_id,
+                outline_release_id=outline_release.id,
+                character_job_id=character_job.id,
+                art_job_id=art_job.id,
+                outline_episodes=[{"scenes": episode.scenes} for episode in outline_episodes],
+                chapter_bodies={chapter.ordinal: chapter.body for chapter in release_chapters},
+            )
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(422, str(error)) from None
+        script_decision = {
+            "candidate_job_id": candidate_job.id,
+            "branch_id": branch.id,
+            "outline_release_id": outline_release.id,
+            "character_job_id": character_job.id,
+            "art_job_id": art_job.id,
+            "episodes": script.episodes,
+        }
+    if (
+        stage_key in {"characters", "art"}
+        and data.action == "accept"
+        and project.creation_mode == "original"
+    ):
+        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        candidate_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.id == candidate_job_id,
+                GenerationJob.project_id == project_id,
+                GenerationJob.stage_key == stage_key,
+                GenerationJob.status == "succeeded",
+            )
+        )
+        output = (
+            db.scalar(
+                select(GenerationOutput.id).where(
+                    GenerationOutput.project_id == project_id,
+                    GenerationOutput.job_id == candidate_job_id,
+                )
+            )
+            if candidate_job
+            else None
+        )
+        if not candidate_job or not output:
+            raise HTTPException(409, "adaptation_asset_candidate_missing")
+        try:
+            branch, outline_release, _ = current_adaptation_outline_context(db, project)
+        except EpisodeSourceMappingError as error:
+            raise HTTPException(409, str(error)) from None
+        scope = candidate_job.input_snapshot.get("scope") or {}
+        refs = set(candidate_job.input_snapshot.get("input_refs", []))
+        if (
+            scope.get("branch_id") != branch.id
+            or scope.get("outline_release_id") != outline_release.id
+            or not {branch.id, outline_release.id, outline_release.job_id}.issubset(refs)
+        ):
+            raise HTTPException(409, "adaptation_asset_candidate_scope_changed")
+        if stage_key == "art":
+            character_stage = db.scalar(
+                select(StageState).where(
+                    StageState.project_id == project_id,
+                    StageState.stage_key == "characters",
+                )
+            )
+            character_job_id = (
+                (character_stage.decision or {}).get("candidate_job_id")
+                if character_stage and character_stage.status == "accepted"
+                else None
+            )
+            if (
+                not character_job_id
+                or scope.get("character_job_id") != character_job_id
+                or character_job_id not in refs
+            ):
+                raise HTTPException(409, "accepted_video_character_constraints_required")
     continuity_decision = None
     release_decision = None
     if stage_key == "continuity" and data.action == "accept":
@@ -470,11 +586,52 @@ def decide_stage(
             outline_release.id,
             stage.decision,
         )
+    elif stage_key == "script" and data.action == "accept" and script_decision:
+        previous_release = db.scalar(
+            select(ScriptRelease)
+            .where(ScriptRelease.branch_id == script_decision["branch_id"])
+            .order_by(ScriptRelease.revision.desc())
+            .limit(1)
+        )
+        release = ScriptRelease(
+            branch_id=script_decision["branch_id"],
+            outline_release_id=script_decision["outline_release_id"],
+            revision=(previous_release.revision + 1) if previous_release else 1,
+            job_id=script_decision["candidate_job_id"],
+            character_job_id=script_decision["character_job_id"],
+            art_job_id=script_decision["art_job_id"],
+            episode_count=len(script_decision["episodes"]),
+            episodes=[episode.model_dump() for episode in script_decision["episodes"]],
+        )
+        db.add(release)
+        db.flush()
+        stage.decision = {
+            "action": "accept",
+            "candidate_job_id": release.job_id,
+            "script_release_id": release.id,
+            "script_revision": release.revision,
+            "branch_id": release.branch_id,
+            "outline_release_id": release.outline_release_id,
+            "episode_count": release.episode_count,
+            "character_job_id": release.character_job_id,
+            "art_job_id": release.art_job_id,
+        }
+        audit(db, project_id, "script.release_accepted", release.id, stage.decision)
     elif (
         stage_key not in {"novelDraft", "continuity", "manuscriptRelease"}
         or data.action != "accept"
     ):
-        stage.decision = {"action": data.action, "reason": data.reason, "risk_ack": data.risk_ack}
+        previous_candidate_job_id = (stage.decision or {}).get("candidate_job_id")
+        stage.decision = {
+            "action": data.action,
+            "reason": data.reason,
+            "risk_ack": data.risk_ack,
+            **(
+                {"candidate_job_id": previous_candidate_job_id}
+                if data.action == "accept" and previous_candidate_job_id
+                else {}
+            ),
+        }
     if stage_key == "creativeBrief":
         brief = db.scalar(select(CreativeBrief).where(CreativeBrief.project_id == project_id))
         if brief:

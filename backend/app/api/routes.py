@@ -7,6 +7,7 @@ from .jobs import router as jobs_router
 from .projects import router as projects_router
 from .providers import router as providers_router
 from .releases import router as releases_router
+from .scripts import router as scripts_router
 from .workflow import router as workflow_router
 
 router = APIRouter()
@@ -17,4 +18,5 @@ router.include_router(creative_router)
 router.include_router(workflow_router)
 router.include_router(providers_router)
 router.include_router(releases_router)
+router.include_router(scripts_router)
 router.include_router(jobs_router)

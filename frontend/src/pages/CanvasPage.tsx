@@ -282,7 +282,10 @@ function StageInspector({
       ? '/writing/adaptation'
       : stage.stage_key === 'outline' && project?.creation_mode === 'original'
         ? '/writing/adaptation-outline'
-        : (stageRoutes[stage.stage_key] ?? '/');
+        : ['characters', 'art', 'script'].includes(stage.stage_key) &&
+            project?.creation_mode === 'original'
+          ? '/writing/script'
+          : (stageRoutes[stage.stage_key] ?? '/');
   const status = statusLabel(stage.status);
   const params = job?.input_snapshot.parameters;
   return (

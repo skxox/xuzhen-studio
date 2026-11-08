@@ -63,6 +63,11 @@ const OriginalAdaptationOutlineWorkspace = lazy(() =>
     ({ OriginalAdaptationOutlineWorkspace: page }) => ({ default: page }),
   ),
 );
+const OriginalScriptWorkspace = lazy(() =>
+  import('../pages/OriginalScriptWorkspace').then(({ OriginalScriptWorkspace: page }) => ({
+    default: page,
+  })),
+);
 
 const sections = [
   { to: '/', label: '制片总览', icon: LayoutDashboard },
@@ -386,9 +391,11 @@ function AppShell() {
             ? '逐集改编交接'
             : location.pathname === '/writing/adaptation-outline'
               ? '视频改编大纲'
-              : location.pathname === '/writing/characters'
-                ? '文学角色圣经'
-                : '故事与剧本'
+              : location.pathname === '/writing/script'
+                ? '分集剧本'
+                : location.pathname === '/writing/characters'
+                  ? '文学角色圣经'
+                  : '故事与剧本'
       : location.pathname === '/settings'
         ? '工作台设置'
         : '叙帧工作台');
@@ -455,6 +462,10 @@ function AppShell() {
               <Route
                 path="/writing/adaptation-outline"
                 element={<OriginalAdaptationOutlineWorkspace key={project?.id} project={project} />}
+              />
+              <Route
+                path="/writing/script"
+                element={<OriginalScriptWorkspace key={project?.id} project={project} />}
               />
               <Route path="/storyboard" element={<StoryboardPage />} />
               <Route path="/canvas" element={<CanvasPage project={project} />} />

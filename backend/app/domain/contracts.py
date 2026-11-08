@@ -185,3 +185,54 @@ class AdaptationOutlineCandidate(BaseModel):
     @classmethod
     def normalize_text(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+
+class ScriptDialogueCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dialogue_number: int = Field(ge=1)
+    speaker: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1, max_length=3000)
+    emotion: str = Field(min_length=1, max_length=120)
+    delivery: str = Field(min_length=1, max_length=240)
+    estimated_seconds: int = Field(ge=1, le=180)
+    source_chapter_ordinals: list[int] = Field(default_factory=list, max_length=200)
+    origin: Literal["direct_quote", "adaptation", "original"]
+
+    @field_validator("speaker", "text", "emotion", "delivery", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ScriptSceneCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_number: int = Field(ge=1)
+    action: str = Field(min_length=1, max_length=8000)
+    action_seconds: int = Field(ge=0, le=7200)
+    dialogues: list[ScriptDialogueCandidate] = Field(default_factory=list, max_length=60)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class EpisodeScriptCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_number: int = Field(ge=1)
+    scenes: list[ScriptSceneCandidate] = Field(min_length=1, max_length=30)
+
+
+class ScriptCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    branch_id: str = Field(min_length=36, max_length=36)
+    release_id: str = Field(min_length=36, max_length=36)
+    outline_release_id: str = Field(min_length=36, max_length=36)
+    character_job_id: str = Field(min_length=36, max_length=36)
+    art_job_id: str = Field(min_length=36, max_length=36)
+    episode_count: int = Field(ge=1, le=500)
+    episodes: list[EpisodeScriptCandidate] = Field(min_length=1, max_length=500)

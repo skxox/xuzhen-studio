@@ -110,6 +110,41 @@ export interface AdaptationOutlineScene {
   beats: AdaptationOutlineBeat[];
 }
 
+export interface ScriptRelease {
+  id: string;
+  branch_id: string;
+  outline_release_id: string;
+  revision: number;
+  job_id: string;
+  character_job_id: string;
+  art_job_id: string;
+  episode_count: number;
+  episodes: Array<{
+    episode_number: number;
+    scenes: Array<{
+      scene_number: number;
+      action: string;
+      action_seconds: number;
+      dialogues: Array<{
+        dialogue_number: number;
+        speaker: string;
+        text: string;
+        emotion: string;
+        delivery: string;
+        estimated_seconds: number;
+        source_chapter_ordinals: number[];
+        origin: 'direct_quote' | 'adaptation' | 'original';
+      }>;
+    }>;
+  }>;
+  is_current: boolean;
+  created_at: string;
+}
+
+export type EpisodeScript = ScriptRelease['episodes'][number];
+export type ScriptScene = EpisodeScript['scenes'][number];
+export type ScriptDialogue = ScriptScene['dialogues'][number];
+
 export interface ApiHealth {
   status: 'ok' | string;
   service: string;

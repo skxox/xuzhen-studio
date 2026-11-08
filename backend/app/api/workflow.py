@@ -32,19 +32,13 @@ from ..services.adaptation_mapping import (
     current_adaptation_branch,
     current_adaptation_outline_context,
 )
-from ..services.continuity import (
-    ContinuityReportError,
-    parse_continuity_report,
-    unresolved_high_findings,
-    unresolved_medium_findings,
-)
 from ..services.keyframe_plan import (
     KeyframePlanError,
     current_shot_plan_release,
     required_shots,
 )
 from ..services.media_decisions import MediaDecisionError, validate_media_decision
-from ..services.novel_draft import NovelDraftCandidateError, parse_chapter_candidate
+from ..services.novel_decisions import NovelDecisionError, validate_novel_decision
 from .common import (
     ALLOWED,
     audit,
@@ -190,110 +184,25 @@ def decide_stage(
                 or character_job_id not in refs
             ):
                 raise HTTPException(409, "accepted_video_character_constraints_required")
-    continuity_decision = None
-    release_decision = None
-    if stage_key == "continuity" and data.action == "accept":
-        continuity_decision = _validated_continuity_decision(db, project_id, stage)
-        report = continuity_decision["report"]
-        high_open = unresolved_high_findings(report)
-        if high_open:
-            raise HTTPException(
-                422,
-                {"code": "high_severity_findings_must_be_resolved", "finding_ids": high_open},
-            )
-        medium_open = unresolved_medium_findings(report)
-        if medium_open and (not data.risk_ack or not data.reason or not data.reason.strip()):
-            raise HTTPException(
-                422,
-                {
-                    "code": "open_medium_findings_require_risk_acknowledgement",
-                    "finding_ids": medium_open,
-                },
-            )
-        accepted_risk = [
-            finding.finding_id for finding in report.findings if finding.status == "accepted_risk"
-        ]
-        if accepted_risk and (not data.risk_ack or not data.reason or not data.reason.strip()):
-            raise HTTPException(422, "accepted_risk_findings_require_reason_and_risk_ack")
-    if stage_key == "manuscriptRelease" and data.action == "accept":
-        if project.creation_mode != "original":
-            raise HTTPException(422, "manuscript_release_requires_original_project")
-        if project.rights_status == "unconfirmed":
-            raise HTTPException(422, "original_work_rights_must_be_recorded")
-        continuity_stage = db.scalar(
-            select(StageState).where(
-                StageState.project_id == project_id, StageState.stage_key == "continuity"
-            )
+    try:
+        novel_decisions = validate_novel_decision(
+            db,
+            project,
+            stage,
+            stage_key,
+            action=data.action,
+            risk_ack=data.risk_ack,
+            reason=data.reason,
         )
-        if not continuity_stage or continuity_stage.status != "accepted":
-            raise HTTPException(409, "accepted_continuity_report_required")
-        continuity_decision = _validated_continuity_decision(db, project_id, continuity_stage)
-        report = continuity_decision["report"]
-        if unresolved_high_findings(report):
-            raise HTTPException(422, "high_severity_findings_must_be_resolved")
-        start, end = report.chapter_start, report.chapter_end
-        latest_chapters = _latest_chapters(db, project_id)
-        scoped_chapters = [
-            latest_chapters[ordinal]
-            for ordinal in range(start, end + 1)
-            if ordinal in latest_chapters
-        ]
-        if len(scoped_chapters) != end - start + 1:
-            raise HTTPException(409, "manuscript_release_scope_is_not_contiguous")
-        if len(scoped_chapters) < 2:
-            raise HTTPException(422, "manuscript_release_requires_at_least_two_chapters")
-        release_decision = {
-            "action": "accept",
-            "continuity_job_id": continuity_decision["job"].id,
-            "continuity_report_revision": continuity_decision["output"].revision,
-            "chapter_start": start,
-            "chapter_end": end,
-            "continuity_risk_ack": (continuity_stage.decision or {}).get("risk_ack", False),
-            "chapter_versions": [
-                {
-                    "ordinal": item.ordinal,
-                    "chapter_id": item.id,
-                    "version": item.version,
-                    "content_hash": item.content_hash,
-                }
-                for item in scoped_chapters
-            ],
-        }
-    chapter_candidate = None
-    candidate_job = None
-    if stage_key == "novelDraft" and data.action == "accept":
-        if project.creation_mode != "original":
-            raise HTTPException(422, "novel_draft_requires_original_project")
-        candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-        candidate_job = db.scalar(
-            select(GenerationJob).where(
-                GenerationJob.id == candidate_job_id,
-                GenerationJob.project_id == project_id,
-                GenerationJob.stage_key == "novelDraft",
-                GenerationJob.status == "succeeded",
-            )
-        )
-        output = (
-            db.scalar(
-                select(GenerationOutput).where(
-                    GenerationOutput.project_id == project_id,
-                    GenerationOutput.job_id == candidate_job_id,
-                )
-            )
-            if candidate_job
-            else None
-        )
-        expected_ordinal = (
-            (candidate_job.input_snapshot.get("scope") or {}).get("chapter_ordinal")
-            if candidate_job
-            else None
-        )
-        if not output or not isinstance(expected_ordinal, int):
-            raise HTTPException(409, "novel_chapter_candidate_missing")
-        try:
-            chapter_candidate = parse_chapter_candidate(output.content, expected_ordinal)
-        except NovelDraftCandidateError as error:
-            raise HTTPException(422, str(error)) from None
+    except NovelDecisionError as error:
+        raise HTTPException(error.status_code, error.detail) from None
+    continuity_decision = novel_decisions.continuity
+    continuity_stage = novel_decisions.continuity_stage
+    release_decision = novel_decisions.release
+    chapter_candidate = novel_decisions.chapter
+    candidate_job = novel_decisions.chapter_job
+    if chapter_candidate is not None and candidate_job is not None:
+        expected_ordinal = chapter_candidate.ordinal
         previous_versions = db.scalars(
             select(Chapter.version).where(
                 Chapter.project_id == project_id, Chapter.ordinal == expected_ordinal
@@ -333,11 +242,11 @@ def decide_stage(
     stage.version += 1
     stage.stale = False
     if stage_key == "continuity" and data.action == "accept" and continuity_decision:
-        report = continuity_decision["report"]
+        report = continuity_decision.report
         stage.decision = {
             "action": "accept",
-            "candidate_job_id": continuity_decision["job"].id,
-            "report_revision": continuity_decision["output"].revision,
+            "candidate_job_id": continuity_decision.job.id,
+            "report_revision": continuity_decision.output.revision,
             "chapter_start": report.chapter_start,
             "chapter_end": report.chapter_end,
             "risk_ack": data.risk_ack,
@@ -349,7 +258,7 @@ def decide_stage(
             "continuity.report_accepted",
             stage.id,
             {
-                "candidate_job_id": continuity_decision["job"].id,
+                "candidate_job_id": continuity_decision.job.id,
                 "chapter_start": report.chapter_start,
                 "chapter_end": report.chapter_end,
                 "finding_count": len(report.findings),
@@ -764,75 +673,3 @@ def decide_stage(
         "version": stage.version,
         "decision": stage.decision,
     }
-
-
-def _latest_chapters(db: Session, project_id: str) -> dict[int, Chapter]:
-    items = db.scalars(
-        select(Chapter)
-        .where(Chapter.project_id == project_id)
-        .order_by(Chapter.ordinal, Chapter.version.desc())
-    ).all()
-    latest: dict[int, Chapter] = {}
-    for item in items:
-        latest.setdefault(item.ordinal, item)
-    return latest
-
-
-def _validated_continuity_decision(db: Session, project_id: str, stage: StageState) -> dict:
-    candidate_job_id = (stage.decision or {}).get("candidate_job_id")
-    job = db.scalar(
-        select(GenerationJob).where(
-            GenerationJob.id == candidate_job_id,
-            GenerationJob.project_id == project_id,
-            GenerationJob.stage_key == "continuity",
-            GenerationJob.status == "succeeded",
-        )
-    )
-    output = (
-        db.scalar(
-            select(GenerationOutput).where(
-                GenerationOutput.project_id == project_id,
-                GenerationOutput.job_id == candidate_job_id,
-            )
-        )
-        if job
-        else None
-    )
-    if not job or not output:
-        raise HTTPException(409, "continuity_report_candidate_missing")
-    scope = job.input_snapshot.get("scope") or {}
-    chapter_start = scope.get("chapter_start")
-    chapter_end = scope.get("chapter_end")
-    if type(chapter_start) is not int or type(chapter_end) is not int:
-        raise HTTPException(409, "continuity_report_scope_missing")
-    chapters = _latest_chapters(db, project_id)
-    chapter_texts = {
-        ordinal: chapters[ordinal].body
-        for ordinal in range(chapter_start, chapter_end + 1)
-        if ordinal in chapters
-    }
-    context_ordinal = scope.get("context_chapter")
-    if type(context_ordinal) is int:
-        if context_ordinal not in chapters:
-            raise HTTPException(409, "continuity_report_context_chapter_changed")
-        chapter_texts[context_ordinal] = chapters[context_ordinal].body
-    latest_ids = {
-        chapters[ordinal].id
-        for ordinal in range(chapter_start, chapter_end + 1)
-        if ordinal in chapters
-    }
-    if type(context_ordinal) is int and context_ordinal in chapters:
-        latest_ids.add(chapters[context_ordinal].id)
-    if not latest_ids.issubset(set(job.input_snapshot.get("input_refs", []))):
-        raise HTTPException(409, "continuity_report_chapter_versions_changed")
-    try:
-        report = parse_continuity_report(
-            output.content,
-            chapter_start,
-            chapter_end,
-            chapter_texts,
-            allow_review_decisions=True,
-        )
-    except ContinuityReportError as error:
-        raise HTTPException(422, str(error)) from None
-    return {"job": job, "output": output, "report": report}

@@ -34,7 +34,12 @@ class Project(Timestamped, Base):
     __tablename__ = "projects"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(200))
-    creation_mode: Mapped[str] = mapped_column(String(24))  # adaptation | original
+    # 旧单维模式，仅作既有阶段分支的桥接；D-01b 完成迁移后移除。
+    creation_mode: Mapped[str] = mapped_column(String(24))  # adaptation | original | commercial
+    # D-01a 创作维度；旧项目行为空，由 D-01b 建立映射，不静默回填。
+    source_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    video_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="active")
     genre: Mapped[str | None] = mapped_column(String(100), nullable=True)
     target_episodes: Mapped[int | None] = mapped_column(Integer, nullable=True)

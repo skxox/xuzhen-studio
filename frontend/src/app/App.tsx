@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   ArrowUpRight,
@@ -13,18 +13,17 @@ import {
   Library,
   Plus,
   Settings2,
-  ShoppingBag,
   SlidersHorizontal,
-  Sparkles,
   Workflow,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { CreationMode, Project, ProjectCreateInput } from '../lib/types';
+import type { Project } from '../lib/types';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Dialog } from '../components/ui/Dialog';
-import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
+import { CreateProjectDialog } from '../components/workspace/CreateProjectDialog';
+import { projectKindLabel } from '../components/workspace/projectDimensions';
 import { AssetsPage } from '../pages/AssetsPage';
 import { DeliveryPage } from '../pages/DeliveryPage';
 import { OverviewPage } from '../pages/OverviewPage';
@@ -97,141 +96,6 @@ const sections = [
   { to: '/delivery', label: '审片交付', icon: Film },
 ];
 
-function modeLabel(mode: CreationMode): string {
-  if (mode === 'original') return '原创小说';
-  if (mode === 'commercial') return '商品短片';
-  return '小说改编';
-}
-
-function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [mode, setMode] = useState<CreationMode>('adaptation');
-  const [name, setName] = useState('');
-  const [genre, setGenre] = useState('都市情感');
-  const [rights, setRights] = useState<ProjectCreateInput['rights_status']>('unconfirmed');
-  const mutation = useMutation({
-    mutationFn: api.createProject,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['projects'] });
-      onClose();
-      setName('');
-    },
-  });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!name.trim()) return;
-    mutation.mutate({
-      name: name.trim(),
-      creation_mode: mode,
-      genre: mode === 'commercial' && genre === '都市情感' ? '商品短片' : genre,
-      target_episodes: mode === 'commercial' ? 1 : 12,
-      episode_seconds: mode === 'commercial' ? 30 : 120,
-      aspect_ratio: '16:9',
-      rights_status: rights,
-    });
-  };
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="建立制作项目"
-      description="选择创作入口。后续可调整制作参数与服务路由。"
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            variant="primary"
-            type="submit"
-            form="create-project-form"
-            disabled={mutation.isPending}
-          >
-            {mutation.isPending ? '正在创建…' : '创建项目'}
-          </Button>
-        </>
-      }
-    >
-      <form id="create-project-form" onSubmit={submit} className="form-stack">
-        <Field label="项目名称">
-          <TextInput
-            autoFocus
-            required
-            maxLength={200}
-            placeholder="输入项目名称"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </Field>
-        <div className="field">
-          <span className="field__label">从哪里开始</span>
-          <div className="choice-grid">
-            <button
-              type="button"
-              className={`choice-card ${mode === 'adaptation' ? 'is-selected' : ''}`}
-              onClick={() => setMode('adaptation')}
-            >
-              <BookOpen size={19} />
-              <strong>已有小说改编</strong>
-              <span>导入原文，建立出处与改编映射</span>
-            </button>
-            <button
-              type="button"
-              className={`choice-card ${mode === 'original' ? 'is-selected' : ''}`}
-              onClick={() => setMode('original')}
-            >
-              <Sparkles size={19} />
-              <strong>从创意原创</strong>
-              <span>从创意简报逐步写成小说，再交接视频</span>
-            </button>
-            <button
-              type="button"
-              className={`choice-card ${mode === 'commercial' ? 'is-selected' : ''}`}
-              onClick={() => setMode('commercial')}
-            >
-              <ShoppingBag size={19} />
-              <strong>商品素材短片</strong>
-              <span>整理产品事实和宣传边界，生成可审阅的广告视频方案</span>
-            </button>
-          </div>
-        </div>
-        <div className="form-row">
-          <Field label={mode === 'commercial' ? '内容类型' : '题材'}>
-            <TextInput
-              value={mode === 'commercial' && genre === '都市情感' ? '商品短片' : genre}
-              onChange={(event) => setGenre(event.target.value)}
-            />
-          </Field>
-          <Field
-            label={mode === 'commercial' ? '素材权利状态' : '原作权利状态'}
-            hint={
-              mode === 'commercial'
-                ? '在商品简报中还需确认具体素材与商标使用授权。'
-                : '有权状态记录后，才可通过原文阶段门禁。'
-            }
-          >
-            <SelectInput
-              value={rights}
-              onChange={(event) =>
-                setRights(event.target.value as ProjectCreateInput['rights_status'])
-              }
-            >
-              <option value="unconfirmed">待确认</option>
-              <option value="owned">自有版权</option>
-              <option value="licensed">已获授权</option>
-              <option value="public_domain">公版作品</option>
-              <option value="restricted">仅限内部评估</option>
-            </SelectInput>
-          </Field>
-        </div>
-        {mutation.isError && (
-          <p className="form-error" role="alert">
-            项目创建失败：{mutation.error.message}
-          </p>
-        )}
-      </form>
-    </Dialog>
-  );
-}
-
 function ProjectPickerDialog({
   open,
   projects,
@@ -265,7 +129,7 @@ function ProjectPickerDialog({
             <span>
               <b>{item.name}</b>
               <small>
-                {modeLabel(item.creation_mode)} · {item.genre || '未设题材'}
+                {projectKindLabel(item)} · {item.genre || '未设题材'}
               </small>
             </span>
             <Badge tone={item.id === activeId ? 'green' : 'neutral'}>
@@ -315,7 +179,7 @@ function Sidebar({ project, onSelectProject }: { project?: Project; onSelectProj
         <span className="project-select__avatar">{project?.name?.slice(0, 1) ?? '帧'}</span>
         <span className="project-select__copy">
           <b>{project?.name ?? '未选择项目'}</b>
-          <small>{project ? modeLabel(project.creation_mode) : '选择或创建项目'}</small>
+          <small>{project ? projectKindLabel(project) : '选择或创建项目'}</small>
         </span>
         <ChevronDown size={15} />
       </button>

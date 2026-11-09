@@ -1,10 +1,18 @@
 export type CreationMode = 'adaptation' | 'original' | 'commercial';
+// D-01a 创作维度：旧项目仅返回 creation_mode，维度字段可能为空。
+export type SourceKind =
+  'ai_novel' | 'existing_novel' | 'finished_script' | 'product_material' | 'creative_brief';
+export type ContentMode = 'drama' | 'narration' | 'commercial';
+export type VideoMode = 'storyboard_video' | 'reference_video';
 export type ThemeName = 'dark' | 'light';
 
 export interface Project {
   id: string;
   name: string;
   creation_mode: CreationMode;
+  source_kind?: SourceKind | null;
+  content_mode?: ContentMode | null;
+  video_mode?: VideoMode | null;
   status: string;
   genre?: string | null;
   target_episodes?: number | null;
@@ -498,7 +506,9 @@ export interface ServiceProfile {
 
 export interface ProjectCreateInput {
   name: string;
-  creation_mode: CreationMode;
+  source_kind: SourceKind;
+  content_mode: ContentMode;
+  video_mode: VideoMode;
   genre?: string;
   target_episodes?: number;
   episode_seconds?: number;

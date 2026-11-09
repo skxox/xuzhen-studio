@@ -29,14 +29,75 @@ import type {
 
 const API_ROOT = import.meta.env.VITE_API_ROOT ?? '/api';
 
+/** 携带后端错误 detail 的请求异常；message 已整理为可读文本。 */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+
+  constructor(status: number, detail: unknown, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+interface ValidationErrorItem {
+  loc?: Array<string | number>;
+  msg?: string;
+}
+
+function isValidationErrorItem(value: unknown): value is ValidationErrorItem {
+  return typeof value === 'object' && value !== null;
+}
+
+function readableErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .filter(isValidationErrorItem)
+      .map((item) => (typeof item.msg === 'string' ? item.msg : undefined))
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) return messages.join('；');
+  }
+  return fallback;
+}
+
+/** 从 422 校验错误中按字段名提取消息，如 { content_mode: '…' }。 */
+export function apiFieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError) || !Array.isArray(error.detail)) return {};
+  const result: Record<string, string> = {};
+  for (const item of error.detail) {
+    if (!isValidationErrorItem(item) || typeof item.msg !== 'string') continue;
+    if (!Array.isArray(item.loc)) continue;
+    const field = item.loc[item.loc.length - 1];
+    if (typeof field === 'string' && !(field in result)) result[field] = item.msg;
+  }
+  return result;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
     headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed (${response.status})`);
+    const raw = await response.text();
+    let parsed: unknown;
+    try {
+      parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    } catch {
+      parsed = null;
+    }
+    const detail =
+      parsed !== null && typeof parsed === 'object' && 'detail' in parsed
+        ? (parsed as { detail: unknown }).detail
+        : raw || null;
+    throw new ApiError(
+      response.status,
+      detail,
+      readableErrorMessage(detail, `Request failed (${response.status})`),
+    );
   }
   return response.json() as Promise<T>;
 }

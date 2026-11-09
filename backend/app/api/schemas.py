@@ -2,10 +2,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
+from ..domain.project_dimensions import ContentMode, SourceKind, VideoMode
+
 
 class ProjectCreate(BaseModel):
+    """新项目按三个独立创作维度创建（D-01a）；不再接收单一 creation_mode。"""
+
     name: str = Field(min_length=1, max_length=200)
-    creation_mode: Literal["adaptation", "original", "commercial"]
+    source_kind: SourceKind
+    content_mode: ContentMode
+    video_mode: VideoMode
     genre: str | None = None
     target_episodes: int | None = Field(default=None, ge=1, le=500)
     episode_seconds: int | None = Field(default=None, ge=10, le=7200)

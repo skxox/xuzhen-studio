@@ -110,6 +110,24 @@
 
 ## 当前状态
 
-- 功能规格与任务卡已整理；本清单中的功能仍待实现和验收。
-- 建议从 **D-01a** 开始：明确内容来源、叙事形式和视频路径的独立模型；后续按前置条件领取功能卡。
+- 功能规格与任务卡已整理；除下方有实现记录的卡片外，其余功能待实现和验收。
+- **D-01a 已实现待验收**；下一张建议领取 **D-01b**（旧 `creation_mode` 项目映射到三维）或 **D-02a**（Alembic 迁移基线）。
 - 功能卡通过验收前保持未完成；结束后记录实现提交、验收证据和未完成边界。
+
+## 实现记录
+
+### D-01a 创建项目时分别选择内容来源、叙事形式、视频路径
+
+- 状态：待验收（分支 `feat/d-01a-project-dimensions`）。
+- 实现：
+  - 后端新增 `backend/app/domain/project_dimensions.py`：`source_kind`（ai_novel/existing_novel/finished_script/product_material/creative_brief）、`content_mode`（drama/narration/commercial）、`video_mode`（storyboard_video/reference_video）取值、组合规则和旧模式桥接函数。
+  - `POST /projects` 改为接收三个独立维度字段；无效来源×叙事组合返回与 FastAPI 校验错误同构的字段级 422（错误定位到 `content_mode`）；新项目按维度确定性桥接旧 `creation_mode`，维持既有阶段路径与门禁分支。
+  - `projects` 表新增三个可空维度列；启动时做最小列补齐保证旧开发库可用（D-02a 建立 Alembic 基线后移除）。旧项目行维度保持为空，不静默回填。
+  - 前端创建表单拆分为三维选择：来源卡片 + 叙事/路径下拉；不兼容叙事选项禁用并显示原因；API 字段错误内联展示到对应控件。
+- 验收证据（2026-11-09，本地临时库实测）：
+  - `pnpm format`、`pnpm lint`（ESLint + Ruff）、`pnpm typecheck` 全部通过。
+  - 合法组合返回 201 并带三维字段与桥接 `creation_mode`：`existing_novel+narration`→adaptation/source；`ai_novel+drama`→original/creativeBrief；`finished_script+narration`→adaptation/source；`creative_brief+commercial`→commercial/commercialBrief；`product_material+commercial`→commercial/commercialBrief；`creative_brief+drama`→adaptation/source。
+  - 非法组合返回字段级 422（loc=`body.content_mode`）：`ai_novel+commercial`、`product_material+drama`；非法枚举 `source_kind=bogus` 返回 422（loc=`body.source_kind`）。
+  - 旧库兼容：对无维度列的旧 `projects` 表执行启动路径后三列自动补齐，旧行 `creation_mode` 未被改写、维度保持为空。
+- 遗留项：`creative_brief` 剧情项目沿用小说导入的 source 界面，待 SRC/STORY 卡细化；`video_mode` 仅存储与校验，媒体路径行为待 VID-01/02；`outputs/index.html` 演示原型未更新入口。
+- 后继卡：D-01b（旧项目映射）、D-02a（迁移基线）、D-03a（来源发布版本）。

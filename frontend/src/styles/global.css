@@ -275,6 +275,11 @@ a {
   font-size: 10px;
   line-height: 1.45;
 }
+.field__error {
+  color: var(--red);
+  font-size: 10px;
+  line-height: 1.45;
+}
 .text-input {
   width: 100%;
   min-width: 0;

@@ -6,6 +6,7 @@ from ..domain.models import (
     Project,
     StageState,
 )
+from ..domain.project_dimensions import dimension_field_errors, legacy_creation_mode
 from ..services.workflow_policy import stage_mode_unavailable_reason
 from .common import (
     COMMERCIAL_STAGES,
@@ -35,7 +36,18 @@ def health():
 
 @router.post("/projects", status_code=201)
 def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
-    p = Project(**data.model_dump())
+    field_errors = dimension_field_errors(data.source_kind, data.content_mode)
+    if field_errors:
+        # 与 FastAPI 校验错误同构的字段级 422，前端可按 loc 定位到具体控件。
+        raise HTTPException(
+            422,
+            detail=[
+                {"type": "value_error", "loc": ["body", field], "msg": message}
+                for field, message in field_errors
+            ],
+        )
+    creation_mode = legacy_creation_mode(data.source_kind, data.content_mode)
+    p = Project(**data.model_dump(), creation_mode=creation_mode)
     db.add(p)
     db.flush()
     path = (
@@ -60,7 +72,18 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
                 status="ready" if key == first_stage else "not_started",
             )
         )
-    audit(db, p.id, "project.created", p.id, {"creation_mode": p.creation_mode})
+    audit(
+        db,
+        p.id,
+        "project.created",
+        p.id,
+        {
+            "source_kind": p.source_kind,
+            "content_mode": p.content_mode,
+            "video_mode": p.video_mode,
+            "legacy_creation_mode": p.creation_mode,
+        },
+    )
     db.commit()
     return safe_project(p)
 

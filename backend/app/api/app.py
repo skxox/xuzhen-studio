@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..core.config import settings
 from ..domain import models as _models  # noqa: F401 - register ORM tables with metadata
-from ..infrastructure.database import Base, engine
+from ..infrastructure.database import Base, engine, ensure_project_dimension_columns
 from .routes import router
 
 
@@ -13,6 +13,7 @@ from .routes import router
 async def lifespan(_: FastAPI):
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    ensure_project_dimension_columns()
     yield
 
 

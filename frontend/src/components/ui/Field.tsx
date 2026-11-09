@@ -8,17 +8,25 @@ import type {
 export function Field({
   label,
   hint,
+  error,
   children,
 }: {
   label: string;
   hint?: string;
+  error?: string;
   children: ReactNode;
 }) {
   return (
     <label className="field">
       <span className="field__label">{label}</span>
       {children}
-      {hint && <span className="field__hint">{hint}</span>}
+      {error ? (
+        <span className="field__error" role="alert">
+          {error}
+        </span>
+      ) : (
+        hint && <span className="field__hint">{hint}</span>
+      )}
     </label>
   );
 }
